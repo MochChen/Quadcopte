@@ -1,7 +1,3 @@
-// 还未改进的地方：
-// sda 是 inout 端口，需要 三态控制, 已经做了，但是不知道有没有问题，还没看时序图
-// I2C 时钟周期 400kHz）, 改为100KHz时，禁用分频器为普通计数器即可
-
 module bb_iic #(
     parameter CLK_MAIN = 50000000, // 50MHz
     parameter SCL_DIV = 800000 // 400KHz是800K转换一次(tick)，500000000/800000 = 62.5
@@ -21,7 +17,7 @@ module bb_iic #(
 );
 
 typedef struct {
-    reg [7:0] commands [7:0]; // 最多存储 8 个 8-bit 命令
+    reg [7:0] commands[7:0]; // 最多存储 8 个 8-bit 命令
     reg [2:0] num_bytes;      // 记录剩余命令个数，最多8个，0表示第一个
 } buffer_t;
 buffer_t cmd_buffer; // 命令缓存器

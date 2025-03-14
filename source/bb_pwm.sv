@@ -17,7 +17,7 @@ module bb_pwm #(
 
     // top state machine
     parameter TOP_IDLE = 0, TOP_ACTIVE = 1; // TOP_ERROR = 2;
-    reg [STATE_WIDTH - 1: 0] top_state, next_top_state;
+    reg [STATE_WIDTH - 1 : 0] top_state, next_top_state;
 
     always @(posedge clk or posedge rst) begin
         if (rst) top_state <= TOP_IDLE;
@@ -26,17 +26,17 @@ module bb_pwm #(
 
     always @(*) begin
         case (top_state)
-            TOP_IDLE: next_top_state <= speed_oe ? TOP_ACTIVE : TOP_IDLE;   
+            TOP_IDLE: next_top_state = speed_oe ? TOP_ACTIVE : TOP_IDLE;
             TOP_ACTIVE: begin
                 if ((speed_reg <= pwm_reg + DEAD_ZONE) && (speed_reg >= pwm_reg - DEAD_ZONE)) begin
-                    next_top_state <= TOP_IDLE;
+                    next_top_state = TOP_IDLE;
                 end
                 else begin
-                    next_top_state <= TOP_ACTIVE;
+                    next_top_state = TOP_ACTIVE;
                 end
             end 
             // TOP_ERROR: next_top_state <= rst ? TOP_IDLE : TOP_ERROR;
-            default: next_top_state <= TOP_IDLE;
+            default: next_top_state = TOP_IDLE;
         endcase
     end
 

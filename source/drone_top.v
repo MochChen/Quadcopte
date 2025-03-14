@@ -1,5 +1,5 @@
-`include "bb_iic.v"
-`include "bb_pwm.v"
+`include "bb_iic.sv"
+`include "bb_pwm.sv"
 
 module drone_top (
     input clk,              // 50MHz主时钟
