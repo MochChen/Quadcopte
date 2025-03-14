@@ -16,34 +16,24 @@ module bb_iic #(
     output reg busy_now
 );
 
-typedef struct {
-    reg [7:0] commands[7:0]; // 最多存储 8 个 8-bit 命令
+
+    reg [7:0] commands[0:7]; // 最多存储 8 个 8-bit 命令
     reg [2:0] num_bytes;      // 记录剩余命令个数，最多8个，0表示第一个
-} buffer_t;
-buffer_t cmd_buffer; // 命令缓存器
+
 
 typedef enum {
-    IDLE,       
-    START,      
-    SEND_CYCLE,
-    ARBITR_1,  
-    RESTART,
-    READ_CYCLE,
-    ARBITR_2,
-    STOP        
+    IDLE, START, SEND_CYCLE, ARBITR_1,  
+    RESTART, READ_CYCLE, ARBITR_2, STOP        
 } state_t;  
 state_t state = IDLE; // 状态机
 
 typedef enum {
-    SEND_BYTE,       
-    R_ACK,      
-    REMAIN_BYTE       
+    SEND_BYTE, R_ACK, REMAIN_BYTE       
 } send_state_t;  
 send_state_t send_state = SEND_BYTE; // send状态机
 
 typedef enum {
-    READ_BYTE,     
-    W_ACK       
+    READ_BYTE, W_ACK
 } read_state_t;  
 read_state_t read_state = READ_BYTE; // read状态机
 
@@ -87,16 +77,16 @@ always @(posedge clk or negedge rst_n) begin
         IDLE:begin
             if (mpu_init) begin
                 initializing <= 1; // 表示正在进行初始化
-                cmd_buffer.num_bytes = 3'd2; // 初始化为 2，表示3个命令
-                cmd_buffer.commands[0] = 8'hD0;
-                cmd_buffer.commands[1] = 8'h6B;
-                cmd_buffer.commands[2] = 8'h00;
+                num_bytes = 3'd2; // 初始化为 2，表示3个命令
+                commands[0] = 8'hD0;
+                commands[1] = 8'h6B;
+                commands[2] = 8'h00;
                 state <= START;
             end
             else if (mpu_transfer) begin
-                cmd_buffer.num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
-                cmd_buffer.commands[0] = 8'hD0;
-                cmd_buffer.commands[1] = 8'h3B;
+                num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
+                commands[0] = 8'hD0;
+                commands[1] = 8'h3B;
                 state <= START;
                 // 启用永远循环读取，除非复位
                 forever_read <= 1;
@@ -115,7 +105,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     else if (scl_neg) begin
                         bit_cnt <= bit_cnt + 1;
-                        sda_gen <= cmd_buffer.commands[byte_cnt][bit_cnt]; // 时钟下降沿改变sda数据
+                        sda_gen <= commands[byte_cnt][bit_cnt]; // 时钟下降沿改变sda数据
                     end
                 end
                 R_ACK: begin
@@ -131,7 +121,7 @@ always @(posedge clk or negedge rst_n) begin
                 end
                 REMAIN_BYTE: begin
                     if (scl_pos) begin
-                        if (byte_cnt == cmd_buffer.num_bytes) begin
+                        if (byte_cnt == num_bytes) begin
                             state <= ARBITR_1;
                             send_state <= SEND_BYTE;
                             bit_cnt <= 0; // 清零计数器，给读取计数时共用
@@ -159,8 +149,8 @@ always @(posedge clk or negedge rst_n) begin
                 if (scl_neg) begin
                     state <= RESTART; // 接收器会在时钟下降沿释放sda，此时才允许RSTART
                     sda_gen <= 1; // 时钟下降沿提前改变sda数据，以便产生RESTART
-                    cmd_buffer.num_bytes = 3'd0; // 第一次restart设置为 0，表示1个命令
-                    cmd_buffer.commands[0] = 8'hD1;
+                    num_bytes = 3'd0; // 第一次restart设置为 0，表示1个命令
+                    commands[0] = 8'hD1;
                     first_restart <= 0;
                 end
             end
@@ -212,9 +202,9 @@ always @(posedge clk or negedge rst_n) begin
         ARBITR_2:begin
             if (forever_read) begin
                 state <= RESTART;
-                cmd_buffer.num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
-                cmd_buffer.commands[0] = 8'hD0;
-                cmd_buffer.commands[1] = 8'h3B;
+                num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
+                commands[0] = 8'hD0;
+                commands[1] = 8'h3B;
                 first_restart <= 1;
             end
             else begin
