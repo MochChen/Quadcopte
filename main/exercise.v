@@ -15,7 +15,7 @@ module exercise_elegant_sm #(
     output reg busy_now
 );
     // parameter calculation
-    // test 01
+    // test 02
     localparam STATE_WIDTH = 4;
 
     // internal signal
