@@ -10,6 +10,7 @@ module bb_iic #(
 
     input  wire rst_n,      // 复位信号（低有效）
     input  wire mpu_init,      // 初始化
+    output reg init_done = 0,
     input  wire mpu_transfer, // 连续数据
     output reg data_avalid,
     output reg [7:0] data,
@@ -143,7 +144,7 @@ always @(posedge clk or negedge rst_n) begin
             if (initializing) begin // 判断是否在执行初始化，否则在执行连续读
                 state <= STOP;
                 initializing <= 0;
-                // sda_gen <= 0; // 有可能需要
+                init_done <= 1;
             end
             else if (first_restart) begin // 判断是否是否第一次restart
                 if (scl_neg) begin
