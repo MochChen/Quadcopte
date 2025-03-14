@@ -11,6 +11,7 @@ module drone_top (
     output wire scl,        // I2C时钟
     inout wire sda,         // I2C数据
     output wire pwm_out     // PWM输出（单电机示例）
+    // test
 );
 
 // I2C模块信号
