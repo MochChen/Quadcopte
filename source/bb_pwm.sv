@@ -1,7 +1,9 @@
+// 使用100Mhz 的clk时候,大约50us完成加速,也就是控制空窗期50us
+
 module bb_pwm #(
     parameter MAX_SPEED = 65536,
-    parameter MIN_SPEED = 256,
-    parameter ACC = 10,
+    parameter MIN_SPEED = 256, 
+    parameter ACC = 2560,
     parameter DEAD_ZONE = ACC / 2,
     parameter STATE_WIDTH = 3
 )(
@@ -41,23 +43,26 @@ module bb_pwm #(
     reg [15:0] cnt = 0;
     reg [15:0] speed_reg = MIN_SPEED;
     reg [15:0] pwm_reg = MIN_SPEED;
-    always @(posedge clk or rst) begin
+    always @(posedge clk or posedge rst) begin
         if (rst) begin
             cnt <= 0;
             speed_reg <= MIN_SPEED;
             pwm_reg <= MIN_SPEED;
         end
         else begin
-            cnt <= cnt + 1;
+            cnt <= cnt + 256;
             case (top_state)        
-                TOP_IDLE: if (speed_oe) speed_reg <= speed_in; 
+                TOP_IDLE: if (speed_oe) speed_reg <= speed_in;
                 TOP_ACTIVE: 
-                    if (speed_reg > pwm_reg + DEAD_ZONE) begin
-                        pwm_reg <= (pwm_reg + ACC > MAX_SPEED) ? MAX_SPEED : pwm_reg + ACC;
-                    end 
-                    else if (speed_reg < pwm_reg - DEAD_ZONE) begin
-                        pwm_reg <= (pwm_reg < MIN_SPEED + ACC) ? MIN_SPEED : pwm_reg - ACC;
-                    end
+                    // if (speed_oe) speed_reg <= speed_in;
+                    if (cnt == 65280) begin
+                        if (speed_reg > pwm_reg + DEAD_ZONE) begin
+                            pwm_reg <= (pwm_reg + ACC > MAX_SPEED) ? MAX_SPEED : pwm_reg + ACC;
+                        end 
+                        else if (speed_reg < pwm_reg - DEAD_ZONE) begin
+                            pwm_reg <= (pwm_reg < MIN_SPEED + ACC) ? MIN_SPEED : pwm_reg - ACC;
+                        end
+                    end    
                 default: next_top_state <= TOP_IDLE; 
             endcase
         end

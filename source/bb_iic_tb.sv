@@ -31,12 +31,13 @@ module bb_iic_tb;
     // Test sequence
     initial begin
         // Initialize signals
-        rst_n = 0;
+        rst_n = 1;
         mpu_init = 0;
         mpu_transfer = 0;
 
         // Reset sequence
-        #50 rst_n = 1;
+        #50 rst_n = 0;
+        #20 rst_n = 1;
         
         // Test initialization
         #50 mpu_init = 1;
@@ -46,15 +47,13 @@ module bb_iic_tb;
         wait (busy_now == 0);
         
         // Test data transfer
-        #50 mpu_transfer = 1;
-        #20 mpu_transfer = 0;
+        #50 mpu_transfer = 0;
+        #20 mpu_transfer = 1;
 
         // Wait for data to be valid
         wait (data_avalid == 1);
 
         // End simulation
-        // test
-        // meiyou genggai 
         #200;
         $stop;
     end

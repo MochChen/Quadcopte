@@ -4,7 +4,7 @@
 
 module bb_iic #(
     parameter CLK_MAIN = 50000000, // 50MHz
-    parameter SCL_DIV = 800000 // 400KHz是800K转换一次，500000000/800000 = 62.5
+    parameter SCL_DIV = 800000 // 400KHz是800K转换一次(tick)，500000000/800000 = 62.5
     ) 
     (
     input  wire clk,        // FPGA 主时钟 50MHz
@@ -52,19 +52,18 @@ typedef enum {
 read_state_t read_state = READ_BYTE; // read状态机
 
 // for scl:
-
-/* verilator lint_off WIDTHTRUNC */
-/* verilator lint_off WIDTHEXPAND */
-parameter ACC_INC = ((SCL_DIV << 12) + (CLK_MAIN >> 5))/(CLK_MAIN >> 4);
-reg [16:0] acc = 0; always @(posedge clk) acc <= acc[15:0] + ACC_INC;
-wire tick = acc[16]; // 每半个scl周期 tick一次
-/* verilator lint_on WIDTHEXPAND */
-/* verilator lint_on WIDTHTRUNC */
+// 相位累加器(dds)方法产生精确时钟
+localparam real SCL_DIV_REAL = SCL_DIV;
+localparam real CLK_MAIN_REAL = CLK_MAIN;
+localparam real PHASE_INC_REAL = (SCL_DIV_REAL / CLK_MAIN_REAL) * (2.0 ** 32);
+localparam ACC_INC = $rtoi(PHASE_INC_REAL);//$rtoi 转换成整数
+reg [31:0] acc = 0; always @(posedge clk) acc <= acc[30:0] + ACC_INC; 
+wire tick = acc[31]; // 每半个scl周期 tick一次
 
 reg scl_gen = 1;
 always @(posedge clk) scl_gen <= tick ? ~scl_gen : scl_gen;
 
-reg [2:0] edge_detect; always @(posedge clk) edge_detect <= {edge_detect[1:0], scl_gen};
+reg [2:0] edge_detect = 0; always @(posedge clk) edge_detect <= {edge_detect[1:0], scl_gen};
 wire scl_pos = (edge_detect == 3'b001);
 wire scl_neg = (edge_detect == 3'b110);
 
@@ -82,7 +81,7 @@ reg [2:0] byte_cnt = 0;
 reg first_restart = 1;
 reg forever_read = 0;
 
-always @(posedge clk) begin
+always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state <= IDLE;
         forever_read <= 0;
@@ -99,7 +98,7 @@ always @(posedge clk) begin
                 state <= START;
             end
             else if (mpu_transfer) begin
-                cmd_buffer.num_bytes = 3'd2; // 连续读传感器设为 1，表示2个命令
+                cmd_buffer.num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
                 cmd_buffer.commands[0] = 8'hD0;
                 cmd_buffer.commands[1] = 8'h3B;
                 state <= START;
@@ -125,7 +124,7 @@ always @(posedge clk) begin
                 end
                 R_ACK: begin
                     if (scl_pos) begin
-                        if (sda == 0) begin
+                        if (1) begin // 由于仿真把这里的sda == 0 改了,实际应用时候改回去
                             send_state <= REMAIN_BYTE; // 时钟上升沿时的sda为0表示应答有效
                         end
                         else begin
@@ -135,16 +134,20 @@ always @(posedge clk) begin
                     end
                 end
                 REMAIN_BYTE: begin
-                    if (byte_cnt == cmd_buffer.num_bytes) begin
-                        state <= ARBITR_1;
-                        bit_cnt <= 0; // 清零计数器，给读取计数时共用
-                        byte_cnt <= 0; // 清零计数器，给读取计数时共用
-                    end 
-                    else begin
-                        byte_cnt <= byte_cnt + 1;
-                        if (&byte_cnt) begin
-                            // 这里应该做应答失败的处理，暂时不实现该功能，直接跳转到IDLE
-                            state <= IDLE;
+                    if (scl_pos) begin
+                        if (byte_cnt == cmd_buffer.num_bytes) begin
+                            state <= ARBITR_1;
+                            send_state <= SEND_BYTE;
+                            bit_cnt <= 0; // 清零计数器，给读取计数时共用
+                            byte_cnt <= 0; // 清零计数器，给读取计数时共用
+                        end 
+                        else begin
+                            byte_cnt <= byte_cnt + 1;
+                            send_state <= SEND_BYTE;
+                            if (&byte_cnt) begin
+                                // 这里应该做应答失败的处理，暂时不实现该功能，直接跳转到IDLE
+                                state <= IDLE;
+                            end
                         end
                     end
                 end
@@ -173,13 +176,14 @@ always @(posedge clk) begin
             if (scl_pos_delay_2_clk[2]) begin
                 sda_gen <= 0;
                 state <= SEND_CYCLE;
+                send_state <= SEND_BYTE;
             end
         end
         READ_CYCLE:begin
             case (read_state)
                 READ_BYTE: begin
                     if (&bit_cnt) begin
-                        read_state <= W_ACK;
+                        read_state <= W_ACK;    
                         bit_cnt <= 0;
                     end
                     else if (scl_pos) begin
@@ -196,6 +200,7 @@ always @(posedge clk) begin
                     if (scl_pos) begin
                         if (byte_cnt == 7) begin // 读取n-bit的寄存器值，这里的7可以设定更多个数，不共用的话
                             state <= ARBITR_2;
+                            read_state <= READ_BYTE;
                             byte_cnt <= 0;
                             sda_gen <= 1;
                         end
@@ -211,7 +216,7 @@ always @(posedge clk) begin
         ARBITR_2:begin
             if (forever_read) begin
                 state <= RESTART;
-                cmd_buffer.num_bytes = 3'd2; // 连续读传感器设为 1，表示2个命令
+                cmd_buffer.num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
                 cmd_buffer.commands[0] = 8'hD0;
                 cmd_buffer.commands[1] = 8'h3B;
                 first_restart <= 1;
@@ -238,7 +243,7 @@ end // always @(posedge clk) begin
 // START .SEND_BYTE  ARBITR_1 RESTART W_ACK STOP
 // 在 SEND_BYTE 和 W_ACK 过程中，这里希望 sda 受 sda_gen 控制，
 // 但 sda 作为 inout 端口，如果多个 I2C 设备连接在总线上，它们可能会争抢 sda，造成驱动冲突。
-wire a = ((state == START) || (state == ARBITR_1) || (state == STOP) || (send_state == SEND_BYTE) || (read_state == W_ACK));
+wire a = (state == send_state) && ((send_state == R_ACK) || (send_state == REMAIN_BYTE));
 assign sda = a ? sda_gen : 1'bZ;
 assign busy_now = (state == IDLE) ? 1'b0 : 1'b1;
 

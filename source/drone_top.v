@@ -1,3 +1,6 @@
+`include "bb_iic.v"
+`include "bb_pwm.v"
+
 module drone_top (
     input clk,              // 50MHz主时钟
     input reset,            // 高有效复位
