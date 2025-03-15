@@ -1,6 +1,6 @@
 `include "bb_iic.sv"
 `include "bb_pwm.sv"
-//`include "async.v"
+`include "async.v"
 
 module drone_top (
     input clk,              // 50MHz主时钟
@@ -84,7 +84,7 @@ module drone_top (
 
 
     // PID ////////////////////////////////////////
-        
+    // 后续增加232控制参数功能 
     // PID参数
     parameter KP = 16'd10;
     parameter KI = 16'd2;
@@ -133,8 +133,8 @@ module drone_top (
             IDLE: next_state = init_done ? GET_MPU : IDLE;
             GET_MPU: next_state = (byte_counter == 6) ? CAL_ATTITUDE : GET_MPU;
             CAL_ATTITUDE: next_state = out_of_control ? ERROR : CAL_PID;
-            CAL_PID: next_state = max_acc_time ? UPDATE_PWM : CAL_PID;
-            UPDATE_PWM:
+            CAL_PID: next_state =  UPDATE_PWM;
+            UPDATE_PWM: next_state = max_acc_time ? GET_MPU : UPDATE_PWM;
             ERROR:
             default: next_state = IDLE;
         endcase

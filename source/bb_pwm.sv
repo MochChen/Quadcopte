@@ -1,6 +1,3 @@
-`include "async.v"
-
-
 module bb_pwm #(
     parameter MAX_SPEED = 65536,
     parameter MIN_SPEED = 256, 
