@@ -1,12 +1,9 @@
 <mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/26.0.4 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36" version="26.0.4">
   <diagram name="第 1 页" id="izZwonRBR8QRrt8GcZ46">
-    <mxGraphModel dx="3174" dy="532" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
+    <mxGraphModel dx="3293" dy="608" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="9u_yu8mjyXwx4cFn0GUE-11" value="PID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
-          <mxGeometry x="-1860" y="80" width="40" height="200" as="geometry" />
-        </mxCell>
         <mxCell id="kPRzyb9tBLseZ4OmYUF7-1" value="" style="endArrow=classic;html=1;rounded=0;" parent="1" edge="1">
           <mxGeometry width="50" height="50" relative="1" as="geometry">
             <mxPoint x="-2160" y="120" as="sourcePoint" />
@@ -94,8 +91,57 @@
         <mxCell id="9u_yu8mjyXwx4cFn0GUE-10" value="落" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
           <mxGeometry x="-1540" y="160" width="40" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="9u_yu8mjyXwx4cFn0GUE-13" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;起飞：&lt;/h1&gt;&lt;p&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;4路pwm不断增大: ，mpu == 上升 ？ pwm_out ++ ，0.8max ? err&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;mpu数据体现上升：current_position&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;mpu计算出上升的目标高度--&amp;gt;转到平衡状态&lt;br&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" vertex="1" parent="1">
-          <mxGeometry x="-1860" y="360" width="390" height="160" as="geometry" />
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-13" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;起飞：&lt;/h1&gt;&lt;p&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;4路pwm不断增大: ，Z 加速度 &amp;gt; 0&amp;nbsp;？ 目标 ++ ，0.8max ? err&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;mpu数据体现上升：Z 加速度 &amp;gt; 0, 加速度积分的积分 = 目标高度&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;mpu计算出上升的目标高度--&amp;gt;转到平衡状态&lt;br&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="-1670" y="320" width="390" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="9u_yu8mjyXwx4cFn0GUE-22">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-1810" y="770" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-22" value="IDLE" style="ellipse;whiteSpace=wrap;html=1;fontSize=24;" vertex="1" parent="1">
+          <mxGeometry x="-1870" y="640" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="9u_yu8mjyXwx4cFn0GUE-24" target="9u_yu8mjyXwx4cFn0GUE-25">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-24" value="MPU采集" style="ellipse;whiteSpace=wrap;html=1;fontSize=24;" vertex="1" parent="1">
+          <mxGeometry x="-1870" y="767" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-35" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="9u_yu8mjyXwx4cFn0GUE-25" target="9u_yu8mjyXwx4cFn0GUE-26">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-25" value="PID控制" style="ellipse;whiteSpace=wrap;html=1;fontSize=24;" vertex="1" parent="1">
+          <mxGeometry x="-1870" y="893" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-36" style="edgeStyle=elbowEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="9u_yu8mjyXwx4cFn0GUE-26" target="9u_yu8mjyXwx4cFn0GUE-24">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-1630" y="800" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="-1670" y="930" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-26" value="PWM输出" style="ellipse;whiteSpace=wrap;html=1;fontSize=24;" vertex="1" parent="1">
+          <mxGeometry x="-1870" y="1020" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="9u_yu8mjyXwx4cFn0GUE-27" target="9u_yu8mjyXwx4cFn0GUE-25">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-27" value="串口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="-2010" y="913" width="70" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-31" value="目标值" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="-1940" y="908" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-33" value="当前值" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="-1810" y="847" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-34" value="初始化完成" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="-1810" y="720" width="80" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="9u_yu8mjyXwx4cFn0GUE-37" value="控制间隔=MPU_oe" style="ellipse;whiteSpace=wrap;html=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="-1670" y="883" width="120" height="80" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
