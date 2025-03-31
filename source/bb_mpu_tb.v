@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-`include "bb_mpu.sv"
+`include "bb_mpu.v"
 module bb_mpu_tb;
     reg clk;
     reg rst_n;
