@@ -1,4 +1,4 @@
-module bb_iic #(
+module bb_mpu #(
     parameter CLK_MAIN = 50000000, // 50MHz
     parameter SCL_DIV = 800000 // 400KHz是800K转换一次(tick)，500000000/800000 = 62.5
     ) 
