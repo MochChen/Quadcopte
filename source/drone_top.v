@@ -116,13 +116,12 @@ module drone_top (
     always @(*) begin
         case (state)
             IDLE: next_state = mpu_init_done ? MPU_CAPTURE : IDLE;//在这里初始化
-            MPU_CAPTURE: next_state = (byte_counter == 12) ? PID_CONTROL : MPU_CAPTURE;//获取12byte的数据
+            MPU_CAPTURE: next_state = capture_done ? PID_CONTROL : MPU_CAPTURE;//获取12byte的数据
             //使用加速度计算两个角度
-            PITCH_ACCEL_DONE:
-            ROLL_ACCEL_DONE:
-            
-            //使用
-            PWM_OUT: next_state =  MPU_CAPTURE;
+            CURRENT: next_state = posture_is_confirmed ? TARGET : ACCEL_DONE;
+            TARGET: next_state = PID_CONTROL;
+            PID_CONTROL: next_state = PWM_OUT;
+            PWM_OUT: next_state = MPU_CAPTURE;
             ERROR:;
             default: next_state = IDLE;
         endcase

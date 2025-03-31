@@ -111,7 +111,7 @@ always @(posedge clk or negedge rst_n) begin
                 end
                 R_ACK: begin
                     if (scl_pos) begin
-                        if (1) begin // 由于仿真把这里的sda == 0 改了,实际应用时候改回去
+                        if (!sda) begin // 由于仿真把这里的sda == 0 改了,实际应用时候改回去
                             send_state <= REMAIN_BYTE; // 时钟上升沿时的sda为0表示应答有效
                         end
                         else begin
