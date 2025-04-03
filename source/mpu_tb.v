@@ -32,12 +32,14 @@ module mpu_tb;
     initial begin
         // Initialize signals
         clk = 0;
-        rst_n = 0;
+        rst_n = 1;
         mpu_init = 0;
         mpu_transfer = 0;
         
         // Reset sequence
         #50;
+        rst_n = 0;
+        #20;
         rst_n = 1;
         
         // Start MPU initialization
@@ -62,7 +64,7 @@ module mpu_tb;
         
         // Wait some cycles before ending the simulation
         #500;
-        $stop;
+        $finish;
     end
     
 endmodule
