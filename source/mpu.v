@@ -1,4 +1,4 @@
-module bb_mpu #(
+module mpu #(
     parameter CLK_MAIN = 50000000, // 50MHz
     parameter SCL_DIV = 800000 // 400KHz是800K转换一次(tick)，500000000/800000 = 62.5
     ) 
@@ -14,7 +14,7 @@ module bb_mpu #(
     input  wire mpu_transfer, // 连续数据
     output reg data_avalid,
     output reg [7:0] data,
-    output reg busy_now
+    output wire busy_now
 );
 
 
@@ -22,21 +22,27 @@ module bb_mpu #(
     reg [2:0] num_bytes;      // 记录剩余命令个数，最多8个，0表示第一个
 
 
-typedef enum {
-    IDLE, START, SEND_CYCLE, ARBITR_1,  
-    RESTART, READ_CYCLE, ARBITR_2, STOP        
-} state_t;  
-state_t state = IDLE; // 状态机
+localparam 
+    IDLE        = 3'h0, 
+    START       = 3'h1, 
+    SEND_CYCLE  = 3'h2, 
+    ARBITR_1    = 3'h3,  
+    RESTART     = 3'h4, 
+    READ_CYCLE  = 3'h5, 
+    ARBITR_2    = 3'h6, 
+    STOP        = 3'h7; 
+reg [2:0] state = IDLE; // 状态机
 
-typedef enum {
-    SEND_BYTE, R_ACK, REMAIN_BYTE       
-} send_state_t;  
-send_state_t send_state = SEND_BYTE; // send状态机
+localparam
+    SEND_BYTE   = 2'h0, 
+    R_ACK       = 2'h1, 
+    REMAIN_BYTE = 2'h2;  
+reg [1:0] send_state = SEND_BYTE; // send状态机
 
-typedef enum {
-    READ_BYTE, W_ACK
-} read_state_t;  
-read_state_t read_state = READ_BYTE; // read状态机
+localparam
+    READ_BYTE   = 2'h0, 
+    W_ACK       = 2'h1;
+reg read_state = READ_BYTE; // read状态机
 
 // for scl:
 // 相位累加器(dds)方法产生精确时钟

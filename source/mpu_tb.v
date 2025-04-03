@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
-`include "bb_mpu.v"
-module bb_mpu_tb;
+`include "mpu.v"
+module mpu_tb;
     reg clk;
     reg rst_n;
     reg mpu_init;
@@ -13,7 +13,7 @@ module bb_mpu_tb;
     wire busy_now;
     
     // Instantiate the DUT (Device Under Test)
-    bb_mpu uut (
+    mpu uut (
         .clk(clk),
         .rst_n(rst_n),
         .mpu_init(mpu_init),
