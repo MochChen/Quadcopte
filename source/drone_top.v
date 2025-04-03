@@ -1,6 +1,6 @@
-`include "bb_mpu.sv"
+`include "mpu.v"
 `include "cordic_angle.v"
-`include "bb_pwm.sv"
+`include "pwm.v"
 `include "bb_pid.v"
 `include "async.v"
 
@@ -101,7 +101,7 @@ module drone_top (
     wire mpu_busy;          // MPU忙碌信号
 
     // MPU模块实例化
-    bb_mpu #(
+    mpu #(
         .CLK_MAIN(50000000),
         .SCL_DIV(800000)
     ) inst_mpu (
@@ -122,8 +122,8 @@ module drone_top (
     wire angle_done;        // 角度计算完成信号
     wire [15:0] pitch_accel;// 加速度计计算的俯仰角
     wire [15:0] roll_accel; // 加速度计计算的滚转角
-    wire signed [31:0] ax, ay, az;  // 加速度数据
-    wire signed [31:0] gyro_x, gyro_y, gyro_z;  // 陀螺仪数据
+    wire signed [15:0] ax, ay, az;  // 加速度数据
+    wire signed [15:0] gyro_x, gyro_y, gyro_z;  // 陀螺仪数据
 
     // CORDIC模块实例化
     cordic_angle #(
@@ -141,74 +141,82 @@ module drone_top (
     );
 
     // PWM模块信号
-    reg [15:0] PWM_M1, PWM_M2, PWM_M3, PWM_M4;  // 四个电机的PWM值
+    reg [15:0] pwm_M1, pwm_M2, pwm_M3, pwm_M4;  // 四个电机的PWM值
     reg m1_oe, m2_oe, m3_oe, m4_oe;             // PWM输出使能
     wire m1_busy, m2_busy, m3_busy, m4_busy;    // PWM忙碌信号
 
     // PWM模块实例化（四个电机）
-    bb_pwm #(
+    pwm #(
         .MAX_SPEED(65536),
         .MIN_SPEED(256),
         .ACC(2560),
         .DEAD_ZONE(1280),
         .STATE_WIDTH(3)
-    ) inst_pwm_m1 (
+    ) inst_pwm_M1 (
         .clk(clk),
-        .rst(rst_n),
-        .speed_in(PWM_M1),
+        .rst_n(rst_n),
+        .speed_in(pwm_M1),
         .speed_oe(m1_oe),
         .pwm_out(pwm_1_out),
         .busy(m1_busy)
     );
 
-    bb_pwm #(
+    pwm #(
         .MAX_SPEED(65536),
         .MIN_SPEED(256),
         .ACC(2560),
         .DEAD_ZONE(1280),
         .STATE_WIDTH(3)
-    ) inst_pwm_m2 (
+    ) inst_pwm_M2 (
         .clk(clk),
-        .rst(rst_n),
-        .speed_in(PWM_M2),
+        .rst_n(rst_n),
+        .speed_in(pwm_M2),
         .speed_oe(m2_oe),
         .pwm_out(pwm_2_out),
         .busy(m2_busy)
     );
 
-    bb_pwm #(
+    pwm #(
         .MAX_SPEED(65536),
         .MIN_SPEED(256),
         .ACC(2560),
         .DEAD_ZONE(1280),
         .STATE_WIDTH(3)
-    ) inst_pwm_m3 (
+    ) inst_pwm_M3 (
         .clk(clk),
-        .rst(rst_n),
-        .speed_in(PWM_M3),
+        .rst_n(rst_n),
+        .speed_in(pwm_M3),
         .speed_oe(m3_oe),
         .pwm_out(pwm_3_out),
         .busy(m3_busy)
     );
 
-    bb_pwm #(
+    pwm #(
         .MAX_SPEED(65536),
         .MIN_SPEED(256),
         .ACC(2560),
         .DEAD_ZONE(1280),
         .STATE_WIDTH(3)
-    ) inst_pwm_m4 (
+    ) inst_pwm_M4 (
         .clk(clk),
-        .rst(rst_n),
-        .speed_in(PWM_M4),
+        .rst_n(rst_n),
+        .speed_in(pwm_M4),
         .speed_oe(m4_oe),
         .pwm_out(pwm_4_out),
         .busy(m4_busy)
     );
 
     // 三段式状态机定义
-    typedef enum reg [2:0] {IDLE, MPU_CAPTURE, CURRENT, TARGET, PID_CONTROL, PWM_OUT, ERROR} state_t;
-    state_t state, next_state;
+    localparam IDLE         = 3'b000;
+    localparam MPU_CAPTURE  = 3'b001;
+    localparam CURRENT      = 3'b010;
+    localparam TARGET       = 3'b011;
+    localparam PID_CONTROL  = 3'b100;
+    localparam PWM_OUT      = 3'b101;
+    localparam ERROR        = 3'b110;
+
+    reg [2:0] state, next_state;
+
 
     // 状态机时序逻辑
     always @(posedge clk or posedge rst_n) begin
@@ -279,10 +287,10 @@ module drone_top (
             Derivative_Pitch_error <= 0;
             Derivative_Roll_error <= 0;
             Derivative_Yaw_error <= 0;
-            PWM_M1 <= 0;
-            PWM_M2 <= 0;
-            PWM_M3 <= 0;
-            PWM_M4 <= 0;
+            pwm_M1 <= 0;
+            pwm_M2 <= 0;
+            pwm_M3 <= 0;
+            pwm_M4 <= 0;
             m1_oe <= 0;
             m2_oe <= 0;
             m3_oe <= 0;
@@ -348,16 +356,16 @@ module drone_top (
                     m3_oe <= 1;
                     m4_oe <= 1;
                     // 计算四个电机的PWM值
-                    PWM_M1 <= PWM_base - (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                    pwm_M1 <= PWM_base - (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
                                        - (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
                                        - (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-                    PWM_M2 <= PWM_base - (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                    pwm_M2 <= PWM_base - (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
                                        + (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
                                        + (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-                    PWM_M3 <= PWM_base + (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                    pwm_M3 <= PWM_base + (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
                                        - (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
                                        + (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-                    PWM_M4 <= PWM_base + (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                    pwm_M4 <= PWM_base + (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
                                        + (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
                                        - (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
                 end
