@@ -1,20 +1,4 @@
-
-// 潜在问题和待改进
-// 高度控制缺失：当前代码未实现高度的闭环控制（current_height未更新）。建议添加超声波或气压计模块，并将高度误差融入PID。
-
-// 数值溢出：PID计算中未检查溢出，建议为Integral_*和PWM_*添加饱和逻辑。
-// verilog
-
-// if (Integral_Pitch_error > 16'h7FFF) Integral_Pitch_error <= 16'h7FFF;
-// else if (Integral_Pitch_error < 16'h8000) Integral_Pitch_error <= 16'h8000;
-
-// 时间步长dt：当前dt设为1，需根据实际采样频率调整（例如50Hz采样率时，dt = 1/50）。
-
-// 调试支持：建议通过串口回传current_pitch、PWM_M1等关键信号，便于验证。
-
-
 `include "bb_mpu.sv"
-`include "cordic_angle.v"
 `include "bb_pwm.sv"
 `include "bb_pid.v"
 `include "async.v"
@@ -29,6 +13,13 @@ module drone_top (
     output pwm_3_out,       // PWM输出至电机3
     output pwm_4_out,       // PWM输出至电机4
     input RxD               // 串口接收数据
+
+    //output out_of_control,   // 失控信号
+    output scl,        // I2C时钟
+    inout sda,         // I2C数据
+    output pwm_out,    // PWM输出（单电机示例）
+
+    input RxD
 );
 
     // 参数定义
@@ -46,6 +37,11 @@ module drone_top (
     reg [15:0] target_pitch;   // 目标俯仰角
     reg [15:0] target_roll;    // 目标滚转角
     reg [15:0] target_yaw;     // 目标偏航角
+// rs232模块信号 /////////////////////////////////////////////////////////////////
+    wire RxD_idle;
+    wire RxD_endofpacket;
+    wire RxD_data_ready;
+    wire [7:0] RxD_data;
 
     // 串口模块实例化
     async_receiver #(
@@ -116,6 +112,16 @@ module drone_top (
     wire mpu_busy;          // MPU忙碌信号
 
     // MPU模块实例化
+
+// MPU模块信号  /////////////////////////////////////////////////////////////////
+    wire rst_n = ~reset;    // 转换为低有效
+    reg mpu_init;
+    wire mpu_init_done;
+    reg mpu_transfer;
+    wire mpu_data_oe;
+    wire [7:0] mpu_data;
+    wire mpu_busy;
+
     bb_mpu #(
         .CLK_MAIN(50000000),
         .SCL_DIV(800000)
@@ -161,19 +167,44 @@ module drone_top (
     wire m1_busy, m2_busy, m3_busy, m4_busy;    // PWM忙碌信号
 
     // PWM模块实例化（四个电机）
+// PWM模块信号 /////////////////////////////////////////////////////////////////
+    reg [15:0] pid_output;
+    reg pwm_update;
+    wire pwm_busy;
+    // PWM模块实例化（单电机示例）
     bb_pwm #(
         .MAX_SPEED(65536),
         .MIN_SPEED(256),
         .ACC(2560),
         .DEAD_ZONE(1280),
         .STATE_WIDTH(3)
-    ) inst_pwm_m1 (
+    ) inst_pwm (
         .clk(clk),
         .rst(reset),
-        .speed_in(PWM_M1),
-        .speed_oe(m1_oe),
-        .pwm_out(pwm_1_out),
-        .busy(m1_busy)
+        .speed_in(pid_output),
+        .speed_oe(pwm_update),
+        .pwm_out(pwm_out),
+        .busy(pwm_busy)
+    );
+
+// PID模块信号 /////////////////////////////////////////////////////////////////
+    reg calc_pid_oe;
+    reg [15:0] target_from_232, current_from_mpu;
+    wire to_pwm_oe;
+    wire [15:0] to_pwm;
+
+    bb_pid #(
+        .KP (16'd10),
+        .KI (16'd2),
+        .KD (16'd5)
+    ) inst_pid (
+        .clk(clk),
+        .rst(reset),
+        .calc_pid_oe(calc_pid_oe),
+        .target_from_232(target_from_232),
+        .current_from_mpu(current_from_mpu),
+        .to_pwm_oe(to_pwm_oe),
+        .to_pwm(to_pwm)
     );
 
     bb_pwm #(
@@ -223,6 +254,12 @@ module drone_top (
 
     // 三段式状态机定义
     typedef enum reg [2:0] {IDLE, MPU_CAPTURE, CURRENT, TARGET, PID_CONTROL, PWM_OUT, ERROR} state_t;
+
+// 三段式状态机  /////////////////////////////////////////////////////////////////
+
+    typedef enum reg [2:0] {
+        IDLE, MPU_CAPTURE, CONTROL, PWM_OUT, ERROR
+    } state_t;
     state_t state, next_state;
 
     // 状态机时序逻辑
@@ -241,6 +278,14 @@ module drone_top (
             PID_CONTROL: next_state = PWM_OUT;
             PWM_OUT: next_state = MPU_CAPTURE;
             ERROR: next_state = IDLE;  // 错误状态返回IDLE
+            IDLE: next_state = mpu_init_done ? MPU_CAPTURE : IDLE;//在这里初始化
+            MPU_CAPTURE: next_state = capture_done ? PID_CONTROL : MPU_CAPTURE;//获取12byte的数据
+            //使用加速度计算两个角度
+            CURRENT: next_state = posture_is_confirmed ? TARGET : ACCEL_DONE;
+            TARGET: next_state = PID_CONTROL;
+            PID_CONTROL: next_state = PWM_OUT;
+            PWM_OUT: next_state = MPU_CAPTURE;
+            ERROR:;
             default: next_state = IDLE;
         endcase
     end
@@ -386,4 +431,89 @@ module drone_top (
         end
     end
 
+
+// 算法处理 与 信号输出
+    
+    // mpu采集3轴(byte_counter == 12)
+    reg [7:0] mpu_data_packed [0:7];    // 完整数据（示例用Z轴加速度）
+    reg [3:0] byte_counter;
+    always @(posedge clk) begin
+        if (state == MPU_CAPTURE && mpu_data_oe) begin
+            if (byte_counter == 12) begin
+                byte_counter <= 0; // Reset byte_counter
+            end
+            else begin
+                byte_counter <= byte_counter + 1; // Increment byte_counter
+                mpu_data_packed[byte_counter] <= mpu_data; // Store data
+            end
+        end
+    end
+
+    // PID_CONTROL------------------   
+    // 角度计算
+    // ax, ay, az 是物理加速度值（单位 g 或 m/s²）
+    wire signed [31:0] ax = {mpu_data_packed[0:1]} * 10000 / 16384;  // 1g = 10000
+    wire signed [31:0] ay = {mpu_data_packed[2:3]} * 10000 / 16384;
+    wire signed [31:0] az = {mpu_data_packed[4:5]} * 10000 / 16384;
+    pitch_accel = cordic_roll(ax, ay, az);
+    roll_accel =  cordic_roll(ax, ay, az);
+
+    wire signed [31:0] gyro_x = {mpu_data_packed[6:7]} * 10000 / 16384;  // 1弧度 = 10000
+    wire signed [31:0] gyro_y = {mpu_data_packed[8:9]} * 10000 / 16384;
+    wire signed [31:0] gyro_z = {mpu_data_packed[10:11]} * 10000 / 16384;
+    pitch_gyro <= pitch_gyro + gyro_x * dt;
+    roll_gyro  <= roll_gyro + gyro_y * dt;
+    yaw_gyro   <= yaw_gyro + gyro_z * dt;
+
+    // 五个输出：pitch_accel、roll_accel、
+    //     pitch_gyro、roll_gyro、yaw_gyro
+
+    // 互补滤波
+    parameter signed [15:0] ALPHA = 98; // 0.98 (放大100倍避免小数计算)
+
+    pitch <= (ALPHA * pitch_gyro + (100 - ALPHA) * pitch_accel) / 100;
+    roll  <= (ALPHA * roll_gyro + (100 - ALPHA) * roll_accel) / 100;
+    // 计算出error
+    get_target();//串口发过来的数据会存在寄存器中，异步读取寄存器作为目标
+
+    Pitch_error = pitch_target - pitch;
+    roll_error = roll_target - roll;
+    Yaw_error = yaw_target - yaw_gyro;
+    Height_error = Height_target - Height_azdt;
+
+    cal_pwm_悬停(); // pwm_悬停 的值通过abs(Height_target - target_height) < 10 时候的值确定
+    PWM_base = cal_pwm_悬停 + compensate(is_move);//这里的补偿是前后左右移动时候Z轴的重力分力会变，补偿保证不会掉落
+
+    // pid
+    PWM_M1 = PWM_base - (Kp_pitch * Pitch_error + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error) 
+                    - (Kp_roll * Roll_error   + Ki_roll * Integral_Roll_error   + Kd_roll * Derivative_Roll_error) 
+                    - (Kp_yaw * Yaw_error     + Ki_yaw * Integral_Yaw_error     + Kd_yaw * Derivative_Yaw_error)
+
+    PWM_M2 = PWM_base - (Kp_pitch * Pitch_error + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                      + (Kp_roll * Roll_error   + Ki_roll * Integral_Roll_error   + Kd_roll * Derivative_Roll_error)
+                      + (Kp_yaw * Yaw_error     + Ki_yaw * Integral_Yaw_error     + Kd_yaw * Derivative_Yaw_error)
+
+    PWM_M3 = PWM_base + (Kp_pitch * Pitch_error + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                      - (Kp_roll * Roll_error   + Ki_roll * Integral_Roll_error   + Kd_roll * Derivative_Roll_error)
+                      + (Kp_yaw * Yaw_error     + Ki_yaw * Integral_Yaw_error     + Kd_yaw * Derivative_Yaw_error)
+
+    PWM_M4 = PWM_base + (Kp_pitch * Pitch_error + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
+                      + (Kp_roll * Roll_error   + Ki_roll * Integral_Roll_error   + Kd_roll * Derivative_Roll_error)
+                      - (Kp_yaw * Yaw_error     + Ki_yaw * Integral_Yaw_error     + Kd_yaw * Derivative_Yaw_error)
+
+
 endmodule
+
+姿态计算:begin
+
+    // set PWM_base = 待机、悬停、起飞
+    // 修改Pitch_error的值 = 前后
+    // 修改Roll_error的值 = 左右
+    // 修改Yaw_error的值 = 旋转
+    // pwm_悬停 的值通过abs(height - target_height) < 10 时候的值确定
+
+    PWM_base = pwm_悬停 + （上下 or 前后左右补偿）：在移动时，倾斜会损失部分垂直升力，可能导致高度下降。
+    // 上下 = 高度pid：(Kp_height * Height_error + Ki_height * Integral_Height_error + Kd_height * Derivative_Height_error)
+
+
+end
