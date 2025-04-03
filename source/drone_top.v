@@ -4,7 +4,10 @@
 `include "bb_pid.v"
 `include "async.v"
 
-module drone_top (
+module drone_top #(
+    parameter PWM_BASE = 16'd30000,  // 悬停时的基础PWM值
+    parameter TILT_CMP = 16'd5000   // 倾斜时的升力补偿
+)(
     input clk,              // 50MHz主时钟
     input rst_n,            // 高有效复位
     output scl,             // I2C时钟
@@ -16,11 +19,8 @@ module drone_top (
     input RxD               // 串口接收数据
 );
 
-    // 参数定义
-    parameter PWM_BASE = 16'd30000;  // 悬停时的基础PWM值
-    parameter TILT_CMP = 16'd5000;   // 倾斜时的升力补偿
 
-    // 串口模块信号
+    // 串口模块
     wire RxD_idle;           // 串口空闲信号
     wire RxD_endofpacket;    // 数据包结束信号
     wire RxD_data_ready;     // 数据就绪信号
@@ -31,8 +31,8 @@ module drone_top (
     reg [15:0] target_pitch;   // 目标俯仰角
     reg [15:0] target_roll;    // 目标滚转角
     reg [15:0] target_yaw;     // 目标偏航角
+    reg [15:0] current_height;  // 当前高度（假设由外部输入或计算）
 
-    // 串口模块实例化
     async_receiver #(
         .ClkFrequency(50000000),  // 50MHz
         .Baud(115200)
@@ -47,16 +47,13 @@ module drone_top (
 
     // 更新动作寄存器
     always @(posedge clk or posedge rst_n) begin
-        if (rst_n) 
-            action_reg <= 8'h00;
-        else if (RxD_data_ready) 
-            action_reg <= RxD_data;
+        if (!rst_n) action_reg <= 8'h00; 
+        else if (RxD_data_ready) action_reg <= RxD_data;
     end
 
     // 目标值映射
-    reg [15:0] current_height;  // 当前高度（假设由外部输入或计算）
     always @(posedge clk or posedge rst_n) begin
-        if (rst_n) begin
+        if (!rst_n) begin
             target_height <= 0;
             target_pitch <= 0;
             target_roll <= 0;
@@ -91,8 +88,7 @@ module drone_top (
         end
     end
 
-    // MPU模块信号
-    wire rst_n = ~rst_n;    // 低有效复位
+    // MPU模块
     reg mpu_init;           // MPU初始化信号
     wire mpu_init_done;     // MPU初始化完成
     reg mpu_transfer;       // MPU数据传输信号
@@ -100,7 +96,6 @@ module drone_top (
     wire [7:0] mpu_data;    // MPU数据
     wire mpu_busy;          // MPU忙碌信号
 
-    // MPU模块实例化
     mpu #(
         .CLK_MAIN(50000000),
         .SCL_DIV(800000)
@@ -117,7 +112,7 @@ module drone_top (
         .busy_now(mpu_busy)
     );
 
-    // CORDIC角度计算模块信号
+    // CORDIC角度计算模块
     reg angle_start;        // 角度计算开始信号
     wire angle_done;        // 角度计算完成信号
     wire [15:0] pitch_accel;// 加速度计计算的俯仰角
@@ -125,12 +120,11 @@ module drone_top (
     wire signed [15:0] ax, ay, az;  // 加速度数据
     wire signed [15:0] gyro_x, gyro_y, gyro_z;  // 陀螺仪数据
 
-    // CORDIC模块实例化
     cordic_angle #(
         .ITERATIONS(12)
     ) inst_angle (
         .clk(clk),
-        .rst_n(rst_n),  // 修正为低有效复位
+        .rst_n(rst_n), 
         .x_in(ax),
         .y_in(ay),
         .z_in(az),
@@ -140,12 +134,11 @@ module drone_top (
         .roll(roll_accel)
     );
 
-    // PWM模块信号
+    // PWM模块
     reg [15:0] pwm_M1, pwm_M2, pwm_M3, pwm_M4;  // 四个电机的PWM值
     reg m1_oe, m2_oe, m3_oe, m4_oe;             // PWM输出使能
     wire m1_busy, m2_busy, m3_busy, m4_busy;    // PWM忙碌信号
 
-    // PWM模块实例化（四个电机）
     pwm #(
         .MAX_SPEED(65536),
         .MIN_SPEED(256),
@@ -206,7 +199,7 @@ module drone_top (
         .busy(m4_busy)
     );
 
-    // 三段式状态机定义
+    // 三段式状态机
     localparam IDLE         = 3'b000;
     localparam MPU_CAPTURE  = 3'b001;
     localparam CURRENT      = 3'b010;
@@ -217,10 +210,39 @@ module drone_top (
 
     reg [2:0] state, next_state;
 
+    
+    // MPU数据采集和姿态计算
+    reg [7:0] mpu_data_packed [0:11];  // MPU原始数据包
+    reg [3:0] byte_counter;            // 数据字节计数器
+    reg capture_done;                  // 数据采集完成标志
+    reg posture_is_confirmed;          // 姿态计算完成标志
+    reg [15:0] pitch_gyro, roll_gyro, yaw_gyro;  // 陀螺仪积分角度
+    reg [15:0] current_pitch, current_roll;      // 当前姿态
+    parameter signed [15:0] ALPHA = 98;          // 互补滤波系数 (0.98 * 100)
+    parameter dt = 16'd1;                        // 假设时间步长（需根据实际采样率调整）
+
+    // 加速度和陀螺仪数据转换
+    assign ax = $signed({mpu_data_packed[0], mpu_data_packed[1]}) * 10000 / 16384;  // 加速度X轴
+    assign ay = $signed({mpu_data_packed[2], mpu_data_packed[3]}) * 10000 / 16384;  // 加速度Y轴
+    assign az = $signed({mpu_data_packed[4], mpu_data_packed[5]}) * 10000 / 16384;  // 加速度Z轴
+    assign gyro_x = $signed({mpu_data_packed[6], mpu_data_packed[7]}) * 10000 / 16384;  // 陀螺仪X轴
+    assign gyro_y = $signed({mpu_data_packed[8], mpu_data_packed[9]}) * 10000 / 16384;  // 陀螺仪Y轴
+    assign gyro_z = $signed({mpu_data_packed[10], mpu_data_packed[11]}) * 10000 / 16384;// 陀螺仪Z轴
+
+    // PID相关信号
+    reg [15:0] PWM_base;              // 基础PWM值
+    reg [15:0] error_height;          // 高度误差
+    reg [15:0] error_pitch, error_roll, error_yaw;  // 姿态误差
+    reg [15:0] Integral_Pitch_error, Integral_Roll_error, Integral_Yaw_error;  // 积分项
+    reg [15:0] Derivative_Pitch_error, Derivative_Roll_error, Derivative_Yaw_error;  // 微分项
+    reg [15:0] prev_error_pitch, prev_error_roll, prev_error_yaw;  // 上一次误差
+    parameter Kp_pitch = 16'd100, Ki_pitch = 16'd10, Kd_pitch = 16'd50;  // PID参数（示例值）
+    parameter Kp_roll = 16'd100, Ki_roll = 16'd10, Kd_roll = 16'd50;
+    parameter Kp_yaw = 16'd80, Ki_yaw = 16'd5, Kd_yaw = 16'd30;
 
     // 状态机时序逻辑
     always @(posedge clk or posedge rst_n) begin
-        if (rst_n) state <= IDLE;
+        if (!rst_n) state <= IDLE;
         else state <= next_state;
     end
 
@@ -238,38 +260,9 @@ module drone_top (
         endcase
     end
 
-    // MPU数据采集和姿态计算
-    reg [7:0] mpu_data_packed [0:11];  // MPU原始数据包
-    reg [3:0] byte_counter;            // 数据字节计数器
-    reg capture_done;                  // 数据采集完成标志
-    reg posture_is_confirmed;          // 姿态计算完成标志
-    reg [15:0] pitch_gyro, roll_gyro, yaw_gyro;  // 陀螺仪积分角度
-    reg [15:0] current_pitch, current_roll;      // 当前姿态
-    parameter signed [15:0] ALPHA = 98;          // 互补滤波系数 (0.98 * 100)
-    parameter dt = 16'd1;                        // 假设时间步长（需根据实际采样率调整）
-
-    // 加速度和陀螺仪数据转换
-    assign ax = {mpu_data_packed[0], mpu_data_packed[1]} * 10000 / 16384;  // 加速度X轴
-    assign ay = {mpu_data_packed[2], mpu_data_packed[3]} * 10000 / 16384;  // 加速度Y轴
-    assign az = {mpu_data_packed[4], mpu_data_packed[5]} * 10000 / 16384;  // 加速度Z轴
-    assign gyro_x = {mpu_data_packed[6], mpu_data_packed[7]} * 10000 / 16384;  // 陀螺仪X轴
-    assign gyro_y = {mpu_data_packed[8], mpu_data_packed[9]} * 10000 / 16384;  // 陀螺仪Y轴
-    assign gyro_z = {mpu_data_packed[10], mpu_data_packed[11]} * 10000 / 16384;// 陀螺仪Z轴
-
-    // PID相关信号
-    reg [15:0] PWM_base;              // 基础PWM值
-    reg [15:0] error_height;          // 高度误差
-    reg [15:0] error_pitch, error_roll, error_yaw;  // 姿态误差
-    reg [15:0] Integral_Pitch_error, Integral_Roll_error, Integral_Yaw_error;  // 积分项
-    reg [15:0] Derivative_Pitch_error, Derivative_Roll_error, Derivative_Yaw_error;  // 微分项
-    reg [15:0] prev_error_pitch, prev_error_roll, prev_error_yaw;  // 上一次误差
-    parameter Kp_pitch = 16'd100, Ki_pitch = 16'd10, Kd_pitch = 16'd50;  // PID参数（示例值）
-    parameter Kp_roll = 16'd100, Ki_roll = 16'd10, Kd_roll = 16'd50;
-    parameter Kp_yaw = 16'd80, Ki_yaw = 16'd5, Kd_yaw = 16'd30;
-
     // 主状态机输出逻辑
     always @(posedge clk or posedge rst_n) begin
-        if (rst_n) begin
+        if (!rst_n) begin
             mpu_init <= 1;
             mpu_transfer <= 0;
             byte_counter <= 0;
@@ -338,12 +331,12 @@ module drone_top (
                     PWM_base <= is_move ? PWM_BASE + TILT_CMP : PWM_BASE;
 
                     // 更新PID积分项和微分项
-                    Integral_Pitch_error <= Integral_Pitch_error + error_pitch;
+                    Integral_Pitch_error <= Integral_Pitch_error + error_pitch;//可能会溢出:
                     Integral_Roll_error <= Integral_Roll_error + error_roll;
                     Integral_Yaw_error <= Integral_Yaw_error + error_yaw;
-                    Derivative_Pitch_error <= error_pitch - prev_error_pitch;
-                    Derivative_Roll_error <= error_roll - prev_error_roll;
-                    Derivative_Yaw_error <= error_yaw - prev_error_yaw;
+                    Derivative_Pitch_error <= (error_pitch - prev_error_pitch) * 90 / 100;
+                    Derivative_Roll_error <= (error_roll - prev_error_roll) * 90 / 100;
+                    Derivative_Yaw_error <= (error_yaw - prev_error_yaw) * 90 / 100;
 
                     // 保存当前误差为下一次使用
                     prev_error_pitch <= error_pitch;
