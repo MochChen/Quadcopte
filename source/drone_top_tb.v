@@ -43,11 +43,10 @@ module drone_top_tb;
     // 测试过程
     initial begin
         clk = 0;
-        rst_n = 0;
+        rst_n = 1;
         RxD = 1;
 
         // 复位
-        #50 rst_n = 1;
         #50 rst_n = 0;
         #50 rst_n = 1;
 

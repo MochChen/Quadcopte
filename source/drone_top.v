@@ -1,8 +1,8 @@
 `include "mpu.v"
 `include "cordic_angle.v"
 `include "pwm.v"
-`include "bb_pid.v"
-`include "async.v"
+`include "async_receiver.v"
+
 
 module drone_top #(
     parameter PWM_BASE = 16'd30000,  // 悬停时的基础PWM值
@@ -46,13 +46,13 @@ module drone_top #(
     );
 
     // 更新动作寄存器
-    always @(posedge clk or posedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) action_reg <= 8'h00; 
         else if (RxD_data_ready) action_reg <= RxD_data;
     end
 
     // 目标值映射
-    always @(posedge clk or posedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             target_height <= 0;
             target_pitch <= 0;
@@ -219,15 +219,25 @@ module drone_top #(
     reg [15:0] pitch_gyro, roll_gyro, yaw_gyro;  // 陀螺仪积分角度
     reg [15:0] current_pitch, current_roll;      // 当前姿态
     parameter signed [15:0] ALPHA = 98;          // 互补滤波系数 (0.98 * 100)
-    parameter dt = 16'd1;                        // 假设时间步长（需根据实际采样率调整）
+    parameter signed dt = 16'd1;                        // 假设时间步长（需根据实际采样率调整）
+    integer i;
 
     // 加速度和陀螺仪数据转换
-    assign ax = $signed({mpu_data_packed[0], mpu_data_packed[1]}) * 10000 / 16384;  // 加速度X轴
-    assign ay = $signed({mpu_data_packed[2], mpu_data_packed[3]}) * 10000 / 16384;  // 加速度Y轴
-    assign az = $signed({mpu_data_packed[4], mpu_data_packed[5]}) * 10000 / 16384;  // 加速度Z轴
-    assign gyro_x = $signed({mpu_data_packed[6], mpu_data_packed[7]}) * 10000 / 16384;  // 陀螺仪X轴
-    assign gyro_y = $signed({mpu_data_packed[8], mpu_data_packed[9]}) * 10000 / 16384;  // 陀螺仪Y轴
-    assign gyro_z = $signed({mpu_data_packed[10], mpu_data_packed[11]}) * 10000 / 16384;// 陀螺仪Z轴
+    wire signed [15:0] raw_ax = {mpu_data_packed[0], mpu_data_packed[1]};
+    wire signed [15:0] raw_ay = {mpu_data_packed[2], mpu_data_packed[3]};
+    wire signed [15:0] raw_az = {mpu_data_packed[4], mpu_data_packed[5]};
+    wire signed [15:0] raw_gyro_x = {mpu_data_packed[6], mpu_data_packed[7]};
+    wire signed [15:0] raw_gyro_y = {mpu_data_packed[8], mpu_data_packed[9]};
+    wire signed [15:0] raw_gyro_z = {mpu_data_packed[10], mpu_data_packed[11]};
+
+    assign ax = raw_ax * 10000 / 16384;
+    assign ay = raw_ay * 10000 / 16384;
+    assign az = raw_az * 10000 / 16384;
+    assign gyro_x = raw_gyro_x * 10000 / 131;   // 陀螺仪分辨率通常是 131 LSB/(°/s)
+    assign gyro_y = raw_gyro_y * 10000 / 131;
+    assign gyro_z = raw_gyro_z * 10000 / 131;
+
+
 
     // PID相关信号
     reg [15:0] PWM_base;              // 基础PWM值
@@ -241,7 +251,7 @@ module drone_top #(
     parameter Kp_yaw = 16'd80, Ki_yaw = 16'd5, Kd_yaw = 16'd30;
 
     // 状态机时序逻辑
-    always @(posedge clk or posedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) state <= IDLE;
         else state <= next_state;
     end
@@ -261,9 +271,10 @@ module drone_top #(
     end
 
     // 主状态机输出逻辑
-    always @(posedge clk or posedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             mpu_init <= 1;
+            for (i = 0; i < 12; i = i + 1) mpu_data_packed[i] <= 8'd0;
             mpu_transfer <= 0;
             byte_counter <= 0;
             capture_done <= 0;

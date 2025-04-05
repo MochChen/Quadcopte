@@ -42,6 +42,7 @@ module mpu_tb;
         #20;
         rst_n = 1;
         
+
         // Start MPU initialization
         #100;
         mpu_init = 1;
@@ -50,7 +51,7 @@ module mpu_tb;
         
         // Wait for initialization to complete
         wait(init_done);
-        $display("MPU6050 Initialized.");
+        $display("      MPU6050 Initialized.");
         
         // Start data transfer
         #200;
@@ -59,8 +60,9 @@ module mpu_tb;
         mpu_transfer = 0;
         
         // Monitor data
-        // while (!data_avalid) #10;
-        $display("Received Data: %h", data);
+        //while (!data_avalid) #10;
+        $display("      Received Data: %h", data);
+
         
         // Wait some cycles before ending the simulation
         #500;

@@ -18,7 +18,7 @@ module pwm #(
 
     // 状态寄存器
     reg [STATE_WIDTH - 1 : 0] state, next_state;
-    always @(posedge clk or posedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) state <= TOP_IDLE;
         else state <= next_state;
     end
@@ -41,7 +41,7 @@ module pwm #(
     reg [15:0] cnt = 0;
     reg [15:0] speed_reg = MIN_SPEED;
     reg [15:0] pwm_reg = MIN_SPEED;
-    always @(posedge clk or posedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cnt <= 0;
             speed_reg <= MIN_SPEED;
