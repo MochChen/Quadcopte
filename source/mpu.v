@@ -1,8 +1,4 @@
-// 你的状态机可以这么做：
-// 检测 INT 上升沿
-// 先读 INT_STATUS（地址 0x3A）
-// 然后开始 burst read 14 字节的数据
-// 等下一次 INT 上升沿
+//`define SIMULATION
 
 module mpu #(
     parameter CLK_MAIN = 50000000, // 50MHz
@@ -39,12 +35,12 @@ module mpu #(
         SEND_BYTE   = 2'h0, 
         R_ACK       = 2'h1, 
         REMAIN_BYTE = 2'h2;  
-    reg [1:0] send_state = SEND_BYTE; // send状态机
+    reg [1:0] sub_state_send = SEND_BYTE; // send状态机
 
     localparam
         READ_BYTE   = 2'h0, 
         W_ACK       = 2'h1;
-    reg read_state = READ_BYTE; // read状态机
+    reg sub_state_read = READ_BYTE; // read状态机
 
     // for scl:
     // 相位累加器(dds)方法产生精确时钟, real 在 Verilog 中是 64 位 IEEE 754 双精度浮点数,防止溢出
@@ -71,191 +67,213 @@ module mpu #(
     reg scl_pos_delay; always @(posedge clk) scl_pos_delay <= scl_pos;
     reg scl_neg_delay; always @(posedge clk) scl_neg_delay <= scl_neg;
 
-    wire scl_en = (!state == IDLE);
+    wire scl_en = !(state == IDLE);
     assign scl = scl_en ? scl_gen : 1;
 
     // for sda:
     reg sda_gen = 1; //用于状态的sda产生
     reg initializing = 0; // 表示是否正在初始化
-    reg [2:0] bit_cnt = 0;
-    reg [3:0] byte_cnt = 0;
+    reg [3:0] send_bit_cnt = 0;
+    reg [3:0] send_byte_cnt = 0;
+    reg [3:0] read_bit_cnt = 0;
+    reg [3:0] read_byte_cnt = 0;
     reg first_restart = 1;
     reg forever_read = 0;
+    reg error = 0;
 
     // 写: 开始 + 设备地址 + (n*9bit) + 停止 ====== 开始 + n*9bit + 停止
     // 读: 开始 + 设备地址 + (n*9bit) + 开始 + 设备地址 + "{ ((m-1)*9bit) + 8bit + NACK + 停止 }"
-
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
             forever_read <= 0;
             data_avalid <= 0;
-            $display("      MPU6050 Reseted.");
-        end else case (state)
-            IDLE:begin
-                if (mpu_init) begin
-                    initializing <= 1; // 表示正在进行初始化
-                    num_bytes = 3'd2;  // 地址:0xD0 寄存器地址:0x6B, 数据:0x00
-                    commands[0] = 8'hD0;
-                    commands[1] = 8'h6B;
-                    commands[2] = 8'h00;
-                    state <= START;
-                end else if (mpu_transfer) begin
-                    num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
-                    commands[0] = 8'hD0;
-                    commands[1] = 8'h3B;
-                    state <= START;
-                    // 启用永远循环读取，除非复位
-                    forever_read <= 1;
+            sda_gen <= 1;
+            error = 0;
+            $display("  复位成功");
+        end else begin
+            case (state)
+                IDLE: begin
+                    if (mpu_init && !error) begin
+                        initializing <= 1;
+                        num_bytes <= 3'd2;
+                        commands[0] <= 8'hD0;
+                        commands[1] <= 8'h6B;
+                        commands[2] <= 8'h00;
+                        state <= START;
+                        $display("  进入初始化...");
+                    end else if (mpu_transfer && !error) begin
+                        num_bytes <= 3'd1;
+                        commands[0] <= 8'hD0;
+                        commands[1] <= 8'h3B;
+                        forever_read <= 1;
+                        state <= START;
+                        $display("  进入连续读...");
+                    end
                 end
-            end
-            START: begin
-                sda_gen <= 0;
-                state <= SEND_CYCLE;
-            end
-            SEND_CYCLE: begin
-                case (send_state)
-                    SEND_BYTE: begin
-                        if (&bit_cnt && scl_neg) begin
-                            send_state <= R_ACK; // 时钟下降沿释放sda
-                            bit_cnt <= 0;
-                        end
-                        else if (scl_neg) begin
-                            bit_cnt <= bit_cnt + 1;
-                            sda_gen <= commands[byte_cnt][bit_cnt]; // 时钟下降沿改变sda数据
-                        end
+                
+                START: begin
+                    if (scl_gen) sda_gen <= 0;
+                    if (scl_neg) begin
+                        state <= SEND_CYCLE;
+                        $display("  START");
                     end
-                    R_ACK: begin
-                        if (scl_pos) begin
-                            if (1) begin // 由于仿真把这里的sda == 0 改了,实际应用时候改回去
-                                send_state <= REMAIN_BYTE; // 时钟上升沿时的sda为0表示应答有效
-                            end
-                            else begin
-                                // 这里应该做应答失败的处理，暂时不实现该功能，直接跳转到IDLE
-                                state <= IDLE;
+                end
+                
+                SEND_CYCLE: begin
+                    case (sub_state_send)
+                        SEND_BYTE: begin
+                            if (scl_neg && send_bit_cnt == 8) begin
+                                send_bit_cnt <= 0;
+                                sub_state_send <= R_ACK;
+                                $display("  send 8_bit...");
+                            end else if (scl_neg) begin
+                                send_bit_cnt <= send_bit_cnt + 1;
+                                sda_gen <= commands[send_byte_cnt][send_bit_cnt];
                             end
                         end
-                    end
-                    REMAIN_BYTE: begin
-                        if (scl_pos) begin
-                            if (byte_cnt == num_bytes) begin
-                                state <= ARBITR_1;
-                                send_state <= SEND_BYTE;
-                                bit_cnt <= 0; // 清零计数器，给读取计数时共用
-                                byte_cnt <= 0; // 清零计数器，给读取计数时共用
-                            end 
-                            else begin
-                                byte_cnt <= byte_cnt + 1;
-                                send_state <= SEND_BYTE;
-                                if (&byte_cnt) begin
-                                    // 这里应该做应答失败的处理，暂时不实现该功能，直接跳转到IDLE
+                        R_ACK: begin
+                            if (scl_pos) begin
+                                if (1) begin
+                                    sub_state_send <= REMAIN_BYTE;
+                                    $display("  ack true.");
+                                end else begin
                                     state <= IDLE;
+                                    error <= 1; 
+                                    sub_state_send <= SEND_BYTE;
+                                    $display("  ack false.");
                                 end
                             end
                         end
-                    end
-                endcase
-            end
-            ARBITR_1:begin
-                if (initializing) begin // 判断是否在执行初始化，否则在执行连续读
-                    state <= STOP;
-                    initializing <= 0;
-                    init_done <= 1;
-                end
-                else if (first_restart) begin // 判断是否是否第一次restart
-                    if (scl_neg) begin
-                        state <= RESTART; // 接收器会在时钟下降沿释放sda，此时才允许RSTART
-                        sda_gen <= 1; // 时钟下降沿提前改变sda数据，以便产生RESTART
-                        num_bytes = 3'd0; // 第一次restart设置为 0，表示1个命令
-                        commands[0] = 8'hD1;
-                        first_restart <= 0;
-                    end
-                end
-                else begin
-                    state <= READ_CYCLE;
-                end
-            end
-            RESTART:begin
-                if (scl_pos_delay) begin
-                    sda_gen <= 0;
-                    state <= SEND_CYCLE;
-                    send_state <= SEND_BYTE;
-                end
-            end
-            READ_CYCLE:begin
-                case (read_state)
-                    READ_BYTE: begin
-                        if (&bit_cnt) begin
-                            read_state <= W_ACK;    
-                            bit_cnt <= 0;
+                        REMAIN_BYTE: begin
+                            if (scl_neg) begin
+                                if (send_byte_cnt == num_bytes) begin
+                                    send_bit_cnt <= 0;
+                                    send_byte_cnt <= 0;
+                                    state <= ARBITR_1;
+                                    sub_state_send <= SEND_BYTE;
+                                    $display("  所有字节发送完");
+                                end else begin
+                                    send_bit_cnt <= 0;
+                                    send_byte_cnt <= send_byte_cnt + 1;
+                                    sub_state_send <= SEND_BYTE;
+                                    $display("  还有字节未发送");
+                                end
+                            end
                         end
-                        else if (scl_pos) begin
-                            `ifdef SIMULATION
-                                data <= {data[6:0], $random & 1};  // 每次随机接收1bit
-                                bit_cnt <= bit_cnt + 1;
-                            `else
-                                //data <= {data[6:0], sda}; 
-                                data <= {data[6:0], 1'b1};  // vivado 没有定义SIMULATION宏
-                                bit_cnt <= bit_cnt + 1;
-                            `endif
-                        end
-                        // 清除数据有效的输出标志
-                        data_avalid <= 0; // 仿真的时候检查一下时序，可能需要增加data的延迟。
-                    end
-                    W_ACK: begin
-                        if (scl_neg) begin
-                            sda_gen <= 0;
-                        end
+                        default: sub_state_send <= SEND_BYTE;
+                    endcase
+                end
+                
+                ARBITR_1: begin
+                    if (initializing) begin
+                        initializing <= 0;
+                        init_done <= 1;
+                        sda_gen <= 0;
+                        state <= STOP;
+                        $display("  初始化完成");
+                    end else if (first_restart) begin
                         if (scl_pos) begin
-                            if (byte_cnt == 12) begin // 读取n-bit的寄存器值，这里的7可以设定更多个数，不共用的话
-                                state <= ARBITR_2;
-                                read_state <= READ_BYTE;
-                                byte_cnt <= 0;
+                            sda_gen <= 1;
+                            num_bytes <= 3'd0;
+                            commands[0] <= 8'hD1;
+                            first_restart <= 0;
+                            state <= RESTART;
+                            $display("  进入restart...");
+                        end
+                    end else begin
+                        state <= READ_CYCLE;
+                        $display("  进入读循环...");
+                    end
+                end
+                
+                RESTART: begin
+                    if (scl_gen) sda_gen <= 0;
+                    if (scl_neg) begin
+                        state <= SEND_CYCLE;
+                        $display("  RESTART");
+                    end
+                end
+                
+                READ_CYCLE: begin
+                    case (sub_state_read)
+                        READ_BYTE: begin
+                            data_avalid <= 0;
+                            if (scl_neg &&  read_bit_cnt == 8) begin
                                 sda_gen <= 1;
+                                sub_state_read <= W_ACK;
+                                //$display("  read 8_bit...");
+                                $display("  [MPU] 读取到字节: %h", data);
                             end
-                            else begin
-                                byte_cnt <= byte_cnt + 1;
-                                data_avalid <= 1;
-                                read_state <= READ_BYTE;
+                            if (scl_pos) begin
+                                `ifdef SIMULATION
+                                    data <= $random & 8'hFF; // 用掩码提取低 8 位
+                                    //data <= {data[6:0], ($random & 1'b1)}; // 只有 1 位随机
+                                `else
+                                    data <= {data[6:0], 1'b1};
+                                `endif
+                                read_bit_cnt <= read_bit_cnt + 1;
                             end
                         end
+                        W_ACK: begin
+                            sda_gen <= 0;
+                            // 判断还有没有需要读取的字节,一共读取12byte
+                            if (scl_neg) begin
+                                if (read_byte_cnt == 12) begin
+                                    read_bit_cnt <= 0;
+                                    read_byte_cnt <= 0;
+                                    sda_gen <= 1;
+                                    data_avalid <= 1;
+                                    state <= ARBITR_2;
+                                    sub_state_read <= READ_BYTE;
+                                    $display("  send nack.");
+                                end else begin
+                                    data_avalid <= 1;
+                                    read_byte_cnt <= read_byte_cnt + 1;
+                                    read_bit_cnt <= 0;
+                                    sub_state_read <= READ_BYTE;
+                                    $display("  send ack.");
+                                end
+                            end
+                        end
+                    endcase
+                end
+                
+                ARBITR_2: begin
+                    data_avalid <= 0;
+                    if (forever_read) begin
+                        num_bytes <= 3'd1;
+                        commands[0] <= 8'hD0;
+                        commands[1] <= 8'h3B;
+                        first_restart <= 1;
+                        state <= RESTART;
+                        $display("  进入restart...");
+                    end else begin
+                        sda_gen <= 0;
+                        state <= STOP;
                     end
-                endcase
-            end
-            ARBITR_2:begin
-                if (forever_read) begin
-                    state <= RESTART;
-                    num_bytes = 3'd1; // 连续读传感器设为 1，表示2个命令
-                    commands[0] = 8'hD0;
-                    commands[1] = 8'h3B;
-                    first_restart <= 1;
                 end
-                else begin
-                    state <= STOP;
+                
+                STOP: begin
+                    if (scl_neg) state <= IDLE;
+                    if (scl_pos_delay) begin
+                        sda_gen <= 1;
+                        $display("  STOP");
+                    end   
                 end
-            end
-            STOP:begin
-                if (scl_pos) begin
-                    sda_gen <= 0;
-                end
-                if (scl_pos_delay) begin
-                    sda_gen <= 1;
-                    state <= IDLE;
-                    forever_read <= 0;
-                end
-            end
-            default: state <= IDLE;
-        endcase
-    end // always @(posedge clk) begin
+                
+                default: state <= IDLE;
+            endcase
+        end
+    end
 
-// state for sda send（assign = sda_gen）
-// START .SEND_BYTE  ARBITR_1 RESTART W_ACK STOP
-// 在 SEND_BYTE 和 W_ACK 过程中，这里希望 sda 受 sda_gen 控制，
-// 但 sda 作为 inout 端口，如果多个 I2C 设备连接在总线上，它们可能会争抢 sda，造成驱动冲突。
-// wire a = (state == send_state) && ((send_state == R_ACK) || (send_state == REMAIN_BYTE));
-wire a = (state == SEND_CYCLE) || (state == START) || (state == RESTART) || (state == STOP) || ((state == READ_CYCLE) && (read_state == W_ACK));
-assign sda = a ? sda_gen : 1'bZ;
-assign busy_now = (state == IDLE) ? 1'b0 : 1'b1;
+    wire sda_permit_write = (state == START) || 
+                            ((state == SEND_CYCLE) && (sub_state_read == SEND_BYTE)) ||
+                            (state == RESTART) ||
+                            ((state == READ_CYCLE) && (sub_state_read == W_ACK)) ||
+                            (state == STOP);
+    assign sda = sda_permit_write ? sda_gen : 1'bZ;
+    assign busy_now = !(state == IDLE);
 
 
 endmodule
