@@ -82,7 +82,7 @@ module mpu #(
     reg error = 0;
 
     // 写: 开始 + 设备地址 + (n*9bit) + 停止 ====== 开始 + n*9bit + 停止
-    // 读: 开始 + 设备地址 + (n*9bit) + 开始 + 设备地址 + "{ ((m-1)*9bit) + 8bit + NACK + 停止 }"
+    // 读: 开始 + 设备地址 + (n*9bit) + 重新开始 + 设备地址 + (m-1)*9bit + 8bit + NACK + 停止
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
@@ -90,7 +90,7 @@ module mpu #(
             data_avalid <= 0;
             sda_gen <= 1;
             error = 0;
-            $display("  复位成功");
+            $display("  [MPU] 复位成功");
         end else begin
             case (state)
                 IDLE: begin
@@ -101,14 +101,14 @@ module mpu #(
                         commands[1] <= 8'h6B;
                         commands[2] <= 8'h00;
                         state <= START;
-                        $display("  进入初始化...");
+                        $display("  [MPU] 进入初始化...");
                     end else if (mpu_transfer && !error) begin
                         num_bytes <= 3'd1;
                         commands[0] <= 8'hD0;
                         commands[1] <= 8'h3B;
                         forever_read <= 1;
                         state <= START;
-                        $display("  进入连续读...");
+                        $display("  [MPU] 进入连续读...");
                     end
                 end
                 
@@ -116,7 +116,7 @@ module mpu #(
                     if (scl_gen) sda_gen <= 0;
                     if (scl_neg) begin
                         state <= SEND_CYCLE;
-                        $display("  START");
+                        $display("  [MPU] START");
                     end
                 end
                 
@@ -126,7 +126,7 @@ module mpu #(
                             if (scl_neg && send_bit_cnt == 8) begin
                                 send_bit_cnt <= 0;
                                 sub_state_send <= R_ACK;
-                                $display("  send 8_bit...");
+                                $display("  [MPU] send 8_bit...");
                             end else if (scl_neg) begin
                                 send_bit_cnt <= send_bit_cnt + 1;
                                 sda_gen <= commands[send_byte_cnt][send_bit_cnt];
@@ -136,12 +136,12 @@ module mpu #(
                             if (scl_pos) begin
                                 if (1) begin
                                     sub_state_send <= REMAIN_BYTE;
-                                    $display("  ack true.");
+                                    $display("  [MPU] ack true.");
                                 end else begin
                                     state <= IDLE;
                                     error <= 1; 
                                     sub_state_send <= SEND_BYTE;
-                                    $display("  ack false.");
+                                    $display("  [MPU] ack false.");
                                 end
                             end
                         end
@@ -152,12 +152,12 @@ module mpu #(
                                     send_byte_cnt <= 0;
                                     state <= ARBITR_1;
                                     sub_state_send <= SEND_BYTE;
-                                    $display("  所有字节发送完");
+                                    $display("  [MPU] 所有字节发送完");
                                 end else begin
                                     send_bit_cnt <= 0;
                                     send_byte_cnt <= send_byte_cnt + 1;
                                     sub_state_send <= SEND_BYTE;
-                                    $display("  还有字节未发送");
+                                    $display("  [MPU] 还有字节未发送");
                                 end
                             end
                         end
@@ -171,7 +171,7 @@ module mpu #(
                         init_done <= 1;
                         sda_gen <= 0;
                         state <= STOP;
-                        $display("  初始化完成");
+                        $display("  [MPU] 初始化完成");
                     end else if (first_restart) begin
                         if (scl_pos) begin
                             sda_gen <= 1;
@@ -179,11 +179,11 @@ module mpu #(
                             commands[0] <= 8'hD1;
                             first_restart <= 0;
                             state <= RESTART;
-                            $display("  进入restart...");
+                            $display("  [MPU] 进入restart...");
                         end
                     end else begin
                         state <= READ_CYCLE;
-                        $display("  进入读循环...");
+                        $display("  [MPU] 进入读循环...");
                     end
                 end
                 
@@ -191,7 +191,7 @@ module mpu #(
                     if (scl_gen) sda_gen <= 0;
                     if (scl_neg) begin
                         state <= SEND_CYCLE;
-                        $display("  RESTART");
+                        $display("  [MPU] RESTART");
                     end
                 end
                 
@@ -219,20 +219,20 @@ module mpu #(
                             sda_gen <= 0;
                             // 判断还有没有需要读取的字节,一共读取12byte
                             if (scl_neg) begin
-                                if (read_byte_cnt == 12) begin
+                                if (read_byte_cnt == 11) begin
                                     read_bit_cnt <= 0;
                                     read_byte_cnt <= 0;
                                     sda_gen <= 1;
                                     data_avalid <= 1;
                                     state <= ARBITR_2;
                                     sub_state_read <= READ_BYTE;
-                                    $display("  send nack.");
+                                    $display("  [MPU] send nack.");
                                 end else begin
                                     data_avalid <= 1;
                                     read_byte_cnt <= read_byte_cnt + 1;
                                     read_bit_cnt <= 0;
                                     sub_state_read <= READ_BYTE;
-                                    $display("  send ack.");
+                                    $display("  [MPU] send ack.");
                                 end
                             end
                         end
@@ -247,7 +247,7 @@ module mpu #(
                         commands[1] <= 8'h3B;
                         first_restart <= 1;
                         state <= RESTART;
-                        $display("  进入restart...");
+                        $display("  [MPU] 进入restart...");
                     end else begin
                         sda_gen <= 0;
                         state <= STOP;
@@ -255,10 +255,11 @@ module mpu #(
                 end
                 
                 STOP: begin
-                    if (scl_neg) state <= IDLE;
+                    //if (scl_neg) state <= IDLE;
                     if (scl_pos_delay) begin
                         sda_gen <= 1;
-                        $display("  STOP");
+                        state <= IDLE;
+                        $display("  [MPU] STOP");
                     end   
                 end
                 
@@ -272,7 +273,7 @@ module mpu #(
                             (state == RESTART) ||
                             ((state == READ_CYCLE) && (sub_state_read == W_ACK)) ||
                             (state == STOP);
-    assign sda = sda_permit_write ? sda_gen : 1'bZ;
+    assign sda = sda_permit_write ? sda_gen : 1'b1;
     assign busy_now = !(state == IDLE);
 
 

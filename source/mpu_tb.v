@@ -1,5 +1,4 @@
     `timescale 1ns/1ps
-    `include "mpu.v"
 
     module mpu_tb;
         reg clk;
@@ -60,7 +59,7 @@
             mpu_transfer = 0;
             
             // Monitor data
-            //while (!data_avalid) #10;
+            while (!data_avalid) #10;
             wait(data_avalid);
 
             

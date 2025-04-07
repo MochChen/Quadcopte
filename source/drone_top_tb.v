@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-`include "drone_top.v"
+//`include "drone_top.v"
 module drone_top_tb;
 
     reg clk;
@@ -19,7 +19,7 @@ module drone_top_tb;
         .pwm_2_out(pwm_2_out),
         .pwm_3_out(pwm_3_out),
         .pwm_4_out(pwm_4_out),
-        .RxD(RxD)
+        .RxD(RxD) 
     );
 
     // 产生时钟

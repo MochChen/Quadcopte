@@ -1,7 +1,7 @@
-`include "mpu.v"
-`include "cordic_angle.v"
-`include "pwm.v"
-`include "async_receiver.v"
+// `include "mpu.v"
+// `include "cordic_angle.v"
+// `include "pwm.v"
+// `include "async_receiver.v"
 
 
 module drone_top #(
@@ -311,7 +311,7 @@ module drone_top #(
                             byte_counter <= 0;
                             capture_done <= 1;
                             angle_start <= 1;
-                            mpu_transfer <= 0;
+                            //mpu_transfer <= 0;
                             // 陀螺仪角度积分
                             pitch_gyro <= pitch_gyro + gyro_x * dt;
                             roll_gyro <= roll_gyro + gyro_y * dt;
