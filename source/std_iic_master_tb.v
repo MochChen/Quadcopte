@@ -1,30 +1,26 @@
 `timescale 1ns/1ps
-`include "mpu.v"
+//`include "std_iic.v"
 
-module mpu_tb;
+module std_iic_master_tb;
     reg clk;
     reg rst_n;
-    reg mpu_init;
-    reg mpu_transfer;
+    reg en_start;
+    reg read_now;
     wire scl;
     wire sda;
-    wire init_done;
     wire data_avalid;
     wire [7:0] data;
-    wire busy_now;
     
     // Instantiate the DUT (Device Under Test)
-    mpu uut (
+    std_iic_master uut (
         .clk(clk),
         .rst_n(rst_n),
-        .mpu_init(mpu_init),
-        .mpu_transfer(mpu_transfer),
+        .en_start(en_start),
+        .read_now(read_now),
         .scl(scl),
-        .sda(sda),
-        .init_done(init_done),
+        .sda(sda), 
         .data_avalid(data_avalid),
-        .data(data),
-        .busy_now(busy_now)
+        .data(data)
     );
     
     // Clock generation (50MHz)
@@ -34,8 +30,8 @@ module mpu_tb;
         // Initialize signals
         clk = 0;
         rst_n = 1;
-        mpu_init = 0;
-        mpu_transfer = 0;
+        en_start = 0;
+        read_now = 0;
         
         // Reset sequence
         #50;
@@ -45,27 +41,27 @@ module mpu_tb;
         
 
         // Start MPU initialization
-        #100;
-        mpu_init = 1;
+        #500;
+        en_start = 1;
         #20;
-        mpu_init = 0;
+        en_start = 0;
         
-        // Wait for initialization to complete
-        wait(init_done);
+        // // Wait for initialization to complete
+        // wait(init_done);
         
-        // Start data transfer
-        #5000;
-        mpu_transfer = 1;
-        #20;
-        mpu_transfer = 0;
+        // // Start data transfer
+        // #5000;
+        // read_now = 1;
+        // #20;
+        // read_now = 0;
         
-        // Monitor data
-        while (!data_avalid) #10;
-        wait(data_avalid);
+        // // Monitor data
+        // while (!data_avalid) #10;
+        // wait(data_avalid);
 
         
         // Wait some cycles before ending the simulation
-        #500;
+        #80000;
         $finish;
     end
     
