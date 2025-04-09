@@ -1,0 +1,6 @@
+改写mpu模块逻辑
+发送的数据包,整理成n*8bits的形式
+初始化: n = 1, data_packed[0] = 0x6B, data_packed[1] = 0x00;
+    开始 + 7bit设备地址&W + 0x6B + 0x00 + 停止;
+连续读: n = 0, data_packed[0] = 0x3B, m = 13; 
+    开始 + 7bit设备地址&W + 0x3B + 重新开始 + 7bit设备地址&R + 12 * 8bits + 停止

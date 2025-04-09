@@ -1,10 +1,12 @@
 `timescale 1ns/1ps
-//`include "std_iic.v"
+//`include "std_iic_master.v"
 
 module std_iic_master_tb;
     reg clk;
     reg rst_n;
     reg en_start;
+    reg [2:0] n_send;
+    reg [2:0] m_read;
     reg read_now;
     wire scl;
     wire sda;
@@ -16,6 +18,9 @@ module std_iic_master_tb;
         .clk(clk),
         .rst_n(rst_n),
         .en_start(en_start),
+        .n_send(n_send),
+        .m_read(m_read),
+        .send_done(send_done),
         .read_now(read_now),
         .scl(scl),
         .sda(sda), 
@@ -31,7 +36,7 @@ module std_iic_master_tb;
         clk = 0;
         rst_n = 1;
         en_start = 0;
-        read_now = 0;
+        read_now = 1;
         
         // Reset sequence
         #50;
@@ -43,21 +48,13 @@ module std_iic_master_tb;
         // Start MPU initialization
         #500;
         en_start = 1;
+        n_send = 1; //2代表读2字节
+        m_read = 1; //1代表读2字节
         #20;
         en_start = 0;
-        
-        // // Wait for initialization to complete
-        // wait(init_done);
-        
-        // // Start data transfer
-        // #5000;
-        // read_now = 1;
-        // #20;
-        // read_now = 0;
-        
-        // // Monitor data
-        // while (!data_avalid) #10;
-        // wait(data_avalid);
+        n_send = 0;
+        m_read = 0;
+    
 
         
         // Wait some cycles before ending the simulation

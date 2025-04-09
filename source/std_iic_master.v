@@ -60,9 +60,7 @@
 module std_iic_master #(
     parameter CLK_MAIN   = 50000000,   // 50MHz 主时钟
     parameter SCL_DIV    = 800000,     // 400KHz是800K转换一次(tick)，500000000/800000 = 62.5
-    parameter N_SEND     = 2,          // 要发送的字节数
-    parameter M_READ     = 1,          // 要读取的字节数
-    parameter [7:0] SLAVE_ADDR = 8'h7E // 默认的I2C设备地址
+    parameter [6:0] SLAVE_ADDR = 7'h68 // 默认的I2C设备地址
     ) 
     (
     input  wire clk,        // FPGA 主时钟 50MHz
@@ -70,6 +68,9 @@ module std_iic_master #(
     inout  wire sda,        // I2C 数据
     input  wire rst_n,      // 复位信号（低有效）
     input  wire en_start,   // 开始信号
+    input wire [15:0] n_send,
+    input wire [15:0] m_read,
+    output wire send_done,
     input  wire read_now,   // read_now = 1表示当前是读,否则是写
     output reg  data_avalid,
     output reg [7:0] data = 0
@@ -110,8 +111,8 @@ module std_iic_master #(
     assign sda = sda_dir ? sda_gen : 1'bZ;
     reg [7:0] data_shift = 0;
     always @(posedge clk) begin
-        if ((state == START) && scl && one_quarter_scl_tick) data_shift <= SLAVE_ADDR;
-        if (state == RESTART) data_shift <= SLAVE_ADDR;
+        if ((state == START) && scl && one_quarter_scl_tick) data_shift <= {SLAVE_ADDR, 1'b0};
+        if (state == RESTART) data_shift <= {SLAVE_ADDR, 1'b1};
     end
     reg [7:0] data_packed [15:0];
 
@@ -127,10 +128,12 @@ module std_iic_master #(
     reg [2:0] next_state = R_ACK;
     reg [3:0] bit_cnt_send = 0;
     reg [3:0] bit_cnt_read = 0;
-    reg [3:0] n = N_SEND;
-    reg [3:0] m = M_READ;
+    reg [15:0] n = 0; // 缓存变量
+    reg [15:0] m = 0; // 缓存变量
+    reg [15:0] N_SEND; // 缓存作为常量比较
+    reg [15:0] M_READ; // 缓存作为常量比较
     reg restart_once = 0;
-    reg last_byte = 0;
+    reg read_now_reg = 0;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -144,15 +147,23 @@ module std_iic_master #(
             bit_cnt_read <= 0;
             restart_once <= 0;
             data_avalid <= 0;
-            last_byte <= 0;
             data_packed[0] <= 8'h6E;//模拟RA
             data_packed[1] <= 8'h66;//模拟DATA
+            read_now_reg <= 0;
 
         end else case (state)
             IDLE: 
-                if (en_start) begin
-                    state <= START;
-                    scl_en <= 1;
+                begin
+                    read_now_reg <= 0;
+                    if (en_start) begin
+                        state <= START;
+                        scl_en <= 1;
+                        read_now_reg <= read_now;
+                        n <= n_send + 1; // 算上设备地址
+                        m <= m_read;
+                        N_SEND <= n_send;
+                        M_READ <= m_read;
+                    end
                 end
             START: 
                 begin
@@ -182,7 +193,7 @@ module std_iic_master #(
                       //if (sda == 0) begin // slave ack true
                         if (1) begin // 仿真一直正确
                             if (n == 0) begin
-                                if (read_now) begin
+                                if (read_now_reg) begin
                                     if (restart_once) begin
                                         next_state <= READ;
                                     end else begin
@@ -197,7 +208,7 @@ module std_iic_master #(
                             end else begin
                                 next_state <= SEND;
                                 n <= n - 1;
-                                data_shift <= data_packed[N_SEND - n];//包内低字节先发送,数据放到包的时候用正常的MSB
+                                data_shift <= data_packed[N_SEND - (n - 1)];//包内低字节先发送,数据放到包的时候用正常的MSB
                                 $display("  [提示] 还有 %h 字节未发送", n);
                             end
                         end else begin      // slave ack fasle
@@ -217,7 +228,6 @@ module std_iic_master #(
                     end
                     if (scl && one_quarter_scl_tick_relay) state <= IDLE;
                     restart_once <= 0;
-                    last_byte <= 0;
                 end
             RESTART:
                 begin
@@ -233,7 +243,7 @@ module std_iic_master #(
                         if (bit_cnt_read == 7) begin
                             state <= W_ACK;
                             bit_cnt_read <= 0;
-                            sda_gen <= last_byte ? 1 : 0; // 最后一位NACK,其他ACK
+                            sda_gen <= (m == 0) ? 1 : 0; // 最后一位NACK,其他ACK
                         end else begin
                             bit_cnt_read <= bit_cnt_read + 1;
                         end
@@ -248,7 +258,6 @@ module std_iic_master #(
                             state <= STOP;
                             sda_gen <= 0;//停止前必须是0
                         end else begin
-                            if (m == (M_READ - 1)) last_byte <= 1;
                             m <= m - 1;
                             state <= READ;
                         end
@@ -257,5 +266,7 @@ module std_iic_master #(
             default: state <= IDLE;
         endcase
     end
+
+    assign send_done = ((state == STOP) && scl && one_quarter_scl_tick_relay && !read_now_reg);
 
 endmodule
