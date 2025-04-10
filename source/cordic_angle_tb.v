@@ -1,88 +1,67 @@
-// 输入 (y, x)	理论角度 (°)	你的 CORDIC 结果 (单位: 16384 = 90°)
-// ( 0, 1)	    0°	            0
-// ( 1, 1)	    45°	            8192
-// ( 1, 0)	    90°	            16384
-// ( -1, 0)	    -90°	        -16384
-// ( 0, -1)	    180° / -180°	±32768
-
 `timescale 1ns / 1ps
 `include "cordic_angle.v"
-module cordic_angle_tb;
-    // 信号定义
-    reg clk;
-    reg rst_n;
-    reg start;
-    reg signed [15:0] x_in, y_in, z_in; 
-    wire done;
-    wire signed [15:0] pitch, roll;
 
-    // 生成时钟信号
-    always #5 clk = ~clk;  // 10ns 时钟周期
+module cordic_angle_tb();
 
-    // 被测模块 (DUT)
-    cordic_angle #(.ITERATIONS(12)) dut (
+    reg clk = 0;
+    reg rst_n = 0;
+
+    reg signed [15:0] x;
+    reg signed [15:0] y;
+    reg signed [15:0] z;
+
+    reg cdra_start;
+    wire cdra_done;
+    wire signed [15:0] crda_angle;
+
+    // 产生50MHz时钟（20ns周期）
+    always #10 clk = ~clk;
+
+    // 实例化被测模块
+    cordic_angle uut (
         .clk(clk),
         .rst_n(rst_n),
-        .x_in(x_in),
-        .y_in(y_in),
-        .z_in(z_in),
-        .start(start),
-        .done(done),
-        .pitch(pitch),
-        .roll(roll)
+        .x(x),
+        .y(y),
+        .z(z),
+        .cdra_start(cdra_start),
+        .cdra_done(cdra_done),
+        .crda_angle(crda_angle)
     );
 
-    // **仿真流程**
     initial begin
-        clk = 0;
+
+        // 初始化
         rst_n = 0;
-        start = 0;
-        x_in = 0;
-        y_in = 0;
-        z_in = 0;
+        cdra_start = 0;
+        x = 0; y = 0; z = 0;
+        #100;
 
-        #20 rst_n = 1;  // 释放复位
-        #10;
+        rst_n = 1;
+        #100;
 
-        // pitch = atan2(ay, sqrt(ax * ax + az * az)); 
-        // roll  = atan2(-ax, sqrt(ay * ay + az * az)); 
-        
-        // **测试 1：水平放置，x = 0, y = 0, z = 1g**
-        x_in = 16'd0;  
-        y_in = 16'd0;
-        z_in = 16'd10000;
-        start = 1;
-        #10 start = 0;
-        
+        // 提供一组 ax, ay, az 输入
+        // 示例：ax = 0.5g, ay = 0.5g, az = 0.707g （正好是 pitch = roll = 30度）
+        // 假设1g对应的数值为 16384（±2g 模式），所以：
+        // x = 8192;     // ax ≈ 0.5g
+        // y = 8192;     // ay ≈ 0.5g
+        // z = 11585;    // az ≈ 0.707g
+        x = 10000;        // ax ≈ 0g
+        y = 10000;        // ay ≈ 0g
+        z = 11585;    // az ≈ 0.707g
+        #20;
+
+        cdra_start = 1;
+        #20;
+        cdra_start = 0;
+
         // 等待计算完成
-        wait(done);
-        $display("  Test 1: Flat   0°     Pitch: %d, Roll: %d", pitch, roll);
-        
-        #50;  // 稍作延迟
+        wait (cdra_done == 1);
+        #20;
 
-        // **测试 2：俯仰角 45 度，x = 0, y = 0.707g, z = 0.707g**
-        x_in = 16'd10000;
-        y_in = 16'd0;  // 0.707 * 2^14
-        z_in = 16'd10000;  
-        start = 1;
-        #10 start = 0;
-        
-        wait(done);
-        $display("  Test 2: Pitch 45°     Pitch: %d, Roll: %d", pitch, roll);
+        $display("  [输出] Pitch(acc) angle:%d", crda_angle);
 
-        #50;
-
-        // **测试 3：横滚角 -30 度，x = -0.5g, y = 0, z = 0.866g**
-        x_in = 16'd0;  // -0.5 * 2^14
-        y_in = -16'd8192;
-        z_in = 16'd14189;  // 0.866 * 2^14
-        start = 1;
-        #10 start = 0;
-
-        wait(done);
-        $display("  Test 3: Roll -30°     Pitch: %d, Roll: %d", pitch, roll);
-
-        #50;
+        #100;
         $finish;
     end
 

@@ -4,3 +4,17 @@
     开始 + 7bit设备地址&W + 0x6B + 0x00 + 停止;
 连续读: n = 0, data_packed[0] = 0x3B, m = 13; 
     开始 + 7bit设备地址&W + 0x3B + 重新开始 + 7bit设备地址&R + 12 * 8bits + 停止
+
+
+无人机总逻辑:
+
+mpu初始化
+mpu初始化结束
+INT == 1
+mpu开始读
+mpu读取结束,拿到12byte
+
+开始加速度的角度计算(cordic_angle)
+角度计算结束,拿到pitch_accel和roll_accel
+
+

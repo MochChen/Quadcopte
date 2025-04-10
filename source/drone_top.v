@@ -1,4 +1,4 @@
-// `include "mpu.v"
+// `include "mpu_top.v"
 // `include "cordic_angle.v"
 // `include "pwm.v"
 // `include "async_receiver.v"
@@ -19,97 +19,25 @@ module drone_top #(
     input RxD               // 串口接收数据
 );
 
-
-    // 串口模块
-    wire RxD_idle;           // 串口空闲信号
-    wire RxD_endofpacket;    // 数据包结束信号
-    wire RxD_data_ready;     // 数据就绪信号
-    wire [7:0] RxD_data;     // 接收到的串口数据
-    reg [7:0] action_reg;    // 目标动作寄存器
-    wire is_move = (action_reg == 8'h03);  // 是否为前进状态
-    reg [15:0] target_height;  // 目标高度
-    reg [15:0] target_pitch;   // 目标俯仰角
-    reg [15:0] target_roll;    // 目标滚转角
-    reg [15:0] target_yaw;     // 目标偏航角
-    reg [15:0] current_height;  // 当前高度（假设由外部输入或计算）
-
-    async_receiver #(
-        .ClkFrequency(50000000),  // 50MHz
-        .Baud(115200)
-    ) inst_rs232 (
-        .clk(clk),
-        .RxD(RxD),
-        .RxD_data_ready(RxD_data_ready),
-        .RxD_data(RxD_data),
-        .RxD_idle(RxD_idle),
-        .RxD_endofpacket(RxD_endofpacket)
-    );
-
-    // 更新动作寄存器
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) action_reg <= 8'h00; 
-        else if (RxD_data_ready) action_reg <= RxD_data;
-    end
-
-    // 目标值映射
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            target_height <= 0;
-            target_pitch <= 0;
-            target_roll <= 0;
-            target_yaw <= 0;
-        end else begin
-            case (action_reg)
-                8'h01: begin  // 起飞
-                    target_height <= 16'd1000;  // 目标高度1米
-                    target_pitch <= 0;
-                    target_roll <= 0;
-                    target_yaw <= 0;
-                end
-                8'h02: begin  // 悬停
-                    target_height <= current_height;  // 保持当前高度
-                    target_pitch <= 0;
-                    target_roll <= 0;
-                    target_yaw <= 0;
-                end
-                8'h03: begin  // 前进
-                    target_height <= current_height;
-                    target_pitch <= 16'd500;  // 目标俯仰角+5°
-                    target_roll <= 0;
-                    target_yaw <= 0;
-                end
-                default: begin
-                    target_height <= 0;
-                    target_pitch <= 0;
-                    target_roll <= 0;
-                    target_yaw <= 0;
-                end
-            endcase
-        end
-    end
-
     // MPU模块
-    reg mpu_init;           // MPU初始化信号
-    wire mpu_init_done;     // MPU初始化完成
-    reg mpu_transfer;       // MPU数据传输信号
-    wire mpu_data_oe;       // MPU数据有效
-    wire [7:0] mpu_data;    // MPU数据
-    wire mpu_busy;          // MPU忙碌信号
+    reg mpu_init_start;
+    reg mpu_read_start;
+    wire mpu_init_done;
+    wire mpu_read_done;
+    wire mpu_data_avalid;
+    wire [7:0] mpu_data;
 
-    mpu #(
-        .CLK_MAIN(50000000),
-        .SCL_DIV(800000)
-    ) inst_mpu (
+    mpu_top mpu_ins (
         .clk(clk),
-        .scl(scl),
-        .sda(sda),
         .rst_n(rst_n),
-        .mpu_init(mpu_init),
+        .init_start(mpu_init_start),
+        .read_start(mpu_read_start),
         .init_done(mpu_init_done),
-        .mpu_transfer(mpu_transfer),
-        .data_avalid(mpu_data_oe),
+        .read_done(mpu_read_done),
+        .data_avalid(mpu_data_avalid),
         .data(mpu_data),
-        .busy_now(mpu_busy)
+        .scl(scl),
+        .sda(sda)
     );
 
     // CORDIC角度计算模块
@@ -378,6 +306,75 @@ module drone_top #(
                     m2_oe <= 0;
                     m3_oe <= 0;
                     m4_oe <= 0;
+                end
+            endcase
+        end
+    end
+
+
+        // 串口模块
+    wire RxD_idle;           // 串口空闲信号
+    wire RxD_endofpacket;    // 数据包结束信号
+    wire RxD_data_ready;     // 数据就绪信号
+    wire [7:0] RxD_data;     // 接收到的串口数据
+    reg [7:0] action_reg;    // 目标动作寄存器
+    wire is_move = (action_reg == 8'h03);  // 是否为前进状态
+    reg [15:0] target_height;  // 目标高度
+    reg [15:0] target_pitch;   // 目标俯仰角
+    reg [15:0] target_roll;    // 目标滚转角
+    reg [15:0] target_yaw;     // 目标偏航角
+    reg [15:0] current_height;  // 当前高度（假设由外部输入或计算）
+
+    async_receiver #(
+        .ClkFrequency(50000000),  // 50MHz
+        .Baud(115200)
+    ) inst_rs232 (
+        .clk(clk),
+        .RxD(RxD),
+        .RxD_data_ready(RxD_data_ready),
+        .RxD_data(RxD_data),
+        .RxD_idle(RxD_idle),
+        .RxD_endofpacket(RxD_endofpacket)
+    );
+
+    // 更新动作寄存器
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) action_reg <= 8'h00; 
+        else if (RxD_data_ready) action_reg <= RxD_data;
+    end
+
+    // 目标值映射
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            target_height <= 0;
+            target_pitch <= 0;
+            target_roll <= 0;
+            target_yaw <= 0;
+        end else begin
+            case (action_reg)
+                8'h01: begin  // 起飞
+                    target_height <= 16'd1000;  // 目标高度1米
+                    target_pitch <= 0;
+                    target_roll <= 0;
+                    target_yaw <= 0;
+                end
+                8'h02: begin  // 悬停
+                    target_height <= current_height;  // 保持当前高度
+                    target_pitch <= 0;
+                    target_roll <= 0;
+                    target_yaw <= 0;
+                end
+                8'h03: begin  // 前进
+                    target_height <= current_height;
+                    target_pitch <= 16'd500;  // 目标俯仰角+5°
+                    target_roll <= 0;
+                    target_yaw <= 0;
+                end
+                default: begin
+                    target_height <= 0;
+                    target_pitch <= 0;
+                    target_roll <= 0;
+                    target_yaw <= 0;
                 end
             endcase
         end
