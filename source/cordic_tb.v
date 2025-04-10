@@ -15,9 +15,7 @@ module cordic_tb;
     wire signed [23:0] y_24 = {{8{y[15]}}, y};
 
     // 实例化 DUT (Device Under Test)
-    cordic #(
-        .ITERATIONS(12)
-    ) dut (
+    cordic dut (
         .clk(clk),
         .rst_n(rst_n),
         .x(x_24),
@@ -44,8 +42,8 @@ module cordic_tb;
         
         // Test 1: 
         #10 
-        x = 16'sd16384;
-        y = 16'sd16384; 
+        x = 16'sd10000;
+        y = 16'sd10000; 
         crd_start = 1; 
         #10 
         crd_start = 0;
@@ -85,3 +83,4 @@ module cordic_tb;
         #50 $finish;
     end
 endmodule
+

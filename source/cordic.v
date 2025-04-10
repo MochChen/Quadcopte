@@ -1,5 +1,5 @@
 module cordic #(
-    parameter integer ITERATIONS = 12  // 迭代次数
+    parameter integer ITERATIONS = 14  // 迭代次数
 )(
     input clk,               
     input rst_n,             // 复位，低有效
@@ -12,13 +12,15 @@ module cordic #(
 );
 
     // 寄存器定义
-    parameter   IDLE     = 2'h0,
-                ROTATION = 2'h1;
-    reg [1:0] state = IDLE;
+    parameter   IDLE     = 3'h0,
+                ROTATION = 3'h1,
+                STOP     = 3'h2;
+    reg [2:0] state = IDLE;
     reg signed [23:0] x_reg;
     reg signed [23:0] y_reg;
     reg signed [23:0] z_reg; //17bit 防止溢出
     reg [3:0] i = 0;
+    reg [40:0] temp = 0;
     
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -65,19 +67,23 @@ module cordic #(
                             end
                             i <= i + 1;
                         end else begin
+                            state <= STOP;
                             crd_angle <= z_reg;
-                            crd_magnitude <= (((x_reg >> 5) * 16'sd9949) >> 9); //记下当前值 和 增益补偿(约等于 crd_magnitude * 0.607253)
-                            //crd_magnitude <= x_reg;
+                            temp <= (x_reg * 16'sd9949);//记下当前值 和 增益补偿(约等于 crd_magnitude * 0.607253)
+                        end
+                    end
+                    STOP:
+                        begin
+                            crd_magnitude <= (temp >> 14);
                             state <= IDLE;
                             crd_done <= 1;
                         end
-                    end
                 default: state <= IDLE;
             endcase
         end
     end
 
-        // CORDIC角度表 (atan(2^-i))，缩放因子 11790 表示 90°
+    // CORDIC角度表 (atan(2^-i))，缩放因子 11790 表示 90°
     reg signed [23:0] atan_table [0:15];  // 17-bit signed
 
     initial begin
