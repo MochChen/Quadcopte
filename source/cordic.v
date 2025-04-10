@@ -66,7 +66,7 @@ module cordic #(
                             i <= i + 1;
                         end else begin
                             crd_angle <= z_reg;
-                            crd_magnitude <= (((x_reg >> 4) * 16'sd9949) >> 10); //记下当前值 和 增益补偿(约等于 crd_magnitude * 0.607253)
+                            crd_magnitude <= (((x_reg >> 5) * 16'sd9949) >> 9); //记下当前值 和 增益补偿(约等于 crd_magnitude * 0.607253)
                             //crd_magnitude <= x_reg;
                             state <= IDLE;
                             crd_done <= 1;
@@ -77,26 +77,53 @@ module cordic #(
         end
     end
 
-    // CORDIC角度表 (atan(2^-i))，缩放因子 16384 表示 90°
+        // CORDIC角度表 (atan(2^-i))，缩放因子 11790 表示 90°
     reg signed [23:0] atan_table [0:15];  // 17-bit signed
 
     initial begin
-        atan_table[0]  = 24'sd8192;  // atan(2^0)  = 45°
-        atan_table[1]  = 24'sd4832;  // atan(2^-1) = 26.565°
-        atan_table[2]  = 24'sd2555;  // atan(2^-2) = 14.036°
-        atan_table[3]  = 24'sd1297;  // atan(2^-3) = 7.125°
-        atan_table[4]  = 24'sd652;   // atan(2^-4) = 3.576°
-        atan_table[5]  = 24'sd326;   // atan(2^-5) = 1.790°
-        atan_table[6]  = 24'sd163;   // atan(2^-6) = 0.895°
-        atan_table[7]  = 24'sd81;    // atan(2^-7) = 0.448°
-        atan_table[8]  = 24'sd41;    // atan(2^-8) = 0.224°
-        atan_table[9]  = 24'sd20;    // atan(2^-9) = 0.112°
-        atan_table[10] = 24'sd10;    // atan(2^-10)= 0.056°
-        atan_table[11] = 24'sd5;     // atan(2^-11)= 0.028°
-        atan_table[12] = 24'sd3;     // atan(2^-12)= 0.014°
-        atan_table[13] = 24'sd1;     // atan(2^-13)= 0.007°
-        atan_table[14] = 24'sd1;     // atan(2^-14)= 0.0035°
-        atan_table[15] = 24'sd0;     // atan(2^-15)= 0.0017°
+        atan_table[0]  = 24'sd5895;  // atan(2^0)  = 45.000° × 131 = 5895
+        atan_table[1]  = 24'sd3480;  // atan(2^-1) = 26.565° × 131 = 3480
+        atan_table[2]  = 24'sd1839;  // atan(2^-2) = 14.036° × 131 = 1839
+        atan_table[3]  = 24'sd933;   // atan(2^-3) = 7.125°  × 131 = 933
+        atan_table[4]  = 24'sd468;   // atan(2^-4) = 3.576°  × 131 = 468
+        atan_table[5]  = 24'sd234;   // atan(2^-5) = 1.790°  × 131 = 234
+        atan_table[6]  = 24'sd117;   // atan(2^-6) = 0.895°  × 131 = 117
+        atan_table[7]  = 24'sd59;    // atan(2^-7) = 0.448°  × 131 = 59
+        atan_table[8]  = 24'sd29;    // atan(2^-8) = 0.224°  × 131 = 29
+        atan_table[9]  = 24'sd15;    // atan(2^-9) = 0.112°  × 131 = 15
+        atan_table[10] = 24'sd7;     // atan(2^-10)= 0.056°  × 131 = 7
+        atan_table[11] = 24'sd4;     // atan(2^-11)= 0.028°  × 131 = 4
+        atan_table[12] = 24'sd2;     // atan(2^-12)= 0.014°  × 131 = 2
+        atan_table[13] = 24'sd1;     // atan(2^-13)= 0.007°  × 131 = 1
+        atan_table[14] = 24'sd0;     // atan(2^-14)= 0.0035° × 131 = 0.46 ≈ 0
+        atan_table[15] = 24'sd0;     // atan(2^-15)= 0.0017° × 131 = 0.22 ≈ 0
     end
 
+
 endmodule
+
+
+
+
+    
+    // // CORDIC角度表 (atan(2^-i))，缩放因子 16384 表示 90°
+    // reg signed [23:0] atan_table [0:15];  // 17-bit signed
+
+    // initial begin
+    //     atan_table[0]  = 24'sd8192;  // atan(2^0)  = 45°
+    //     atan_table[1]  = 24'sd4832;  // atan(2^-1) = 26.565°
+    //     atan_table[2]  = 24'sd2555;  // atan(2^-2) = 14.036°
+    //     atan_table[3]  = 24'sd1297;  // atan(2^-3) = 7.125°
+    //     atan_table[4]  = 24'sd652;   // atan(2^-4) = 3.576°
+    //     atan_table[5]  = 24'sd326;   // atan(2^-5) = 1.790°
+    //     atan_table[6]  = 24'sd163;   // atan(2^-6) = 0.895°
+    //     atan_table[7]  = 24'sd81;    // atan(2^-7) = 0.448°
+    //     atan_table[8]  = 24'sd41;    // atan(2^-8) = 0.224°
+    //     atan_table[9]  = 24'sd20;    // atan(2^-9) = 0.112°
+    //     atan_table[10] = 24'sd10;    // atan(2^-10)= 0.056°
+    //     atan_table[11] = 24'sd5;     // atan(2^-11)= 0.028°
+    //     atan_table[12] = 24'sd3;     // atan(2^-12)= 0.014°
+    //     atan_table[13] = 24'sd1;     // atan(2^-13)= 0.007°
+    //     atan_table[14] = 24'sd1;     // atan(2^-14)= 0.0035°
+    //     atan_table[15] = 24'sd0;     // atan(2^-15)= 0.0017°
+    // end

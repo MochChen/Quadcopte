@@ -44,8 +44,8 @@ module cordic_tb;
         
         // Test 1: 
         #10 
-        x = 16'sd0;
-        y = 16'sd0; 
+        x = 16'sd16384;
+        y = 16'sd16384; 
         crd_start = 1; 
         #10 
         crd_start = 0;
