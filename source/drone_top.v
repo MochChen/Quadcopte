@@ -83,13 +83,50 @@ module drone_top #(
                 MPU_CAPTURE  = 3'h1,
                 CRD_PITCH    = 3'h2,
                 CRD_ROLL     = 3'h3,
-                PID_CONTROL  = 3'h4,
-                PWM_OUT      = 3'h5,
-                ERROR        = 3'h6;
+                CMP_FILTER   = 3'h4,
+                CAL_ERROR    = 3'h5,
+                CAL_PID      = 3'h6,
+                NEXT_CAPTURE = 3'h7;
     reg [2:0] state = IDLE;
+
     reg mpu_init_done_reg;
     reg [7:0] mpu_data_packed [13:0]; //一共14字节
     reg [3:0] byte_cnt = 0;
+    reg [3:0] ALPHA = 99;
+    reg dt = 1; //mpu采集的间隔时间,单位秒
+    reg [23:0] cur_pitch_gyro;
+    reg [23:0] cur_roll_gyro;
+    reg [23:0] cur_yaw_gyro;
+    always @(posedge clk) begin
+        if (mpu_read_done) begin
+            cur_pitch_gyro <= cur_pitch_gyro + dt * $signed({mpu_data_packed[8], mpu_data_packed[9]});
+            cur_roll_gyro <= cur_roll_gyro + dt * $signed({mpu_data_packed[10], mpu_data_packed[11]});
+            cur_yaw_gyro <= cur_yaw_gyro + dt * $signed({mpu_data_packed[12], mpu_data_packed[13]});
+        end
+    end
+    reg [23:0] cur_pitch; // 积分满了会不会溢出?
+    reg [23:0] cur_roll;
+    reg [23:0] cur_yaw;
+    reg [23:0] tgt_pitch; //由外部串口信号输入进行更新
+    reg [23:0] tgt_roll;  //由外部串口信号输入进行更新
+    reg [23:0] tgt_yaw;   //由外部串口信号输入进行更新
+    reg [23:0] pitch_error;
+    reg [23:0] roll_error;
+    reg [23:0] yaw_error;
+    reg [23:0] pre_pitch_error;
+    reg [23:0] pre_roll_error;
+    reg [23:0] pre_yaw_error;
+    reg [23:0] i_pitch_error;
+    reg [23:0] i_roll_error;
+    reg [23:0] i_yaw_error;
+    reg [23:0] d_pitch_error;
+    reg [23:0] d_roll_error;
+    reg [23:0] d_yaw_error;
+    reg [23:0] PWM_base; //和高度控制有关,起飞时候逐渐增大,到达指定高度并且稳定决定,逻辑不知道怎么实现
+    reg [7:0] Kp = 100;
+    reg [7:0] Ki = 1;
+    reg [7:0] Kd = 1;
+
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -151,254 +188,129 @@ module drone_top #(
                     end
                 CMP_FILTER:
                     begin
-                        current_pitch <= (ALPHA * pitch_gyro + (100 - ALPHA) * cur_pitch_acc) / 100;
-                        current_roll  <= (ALPHA * roll_gyro  + (100 - ALPHA) * cur_roll_acc) / 100;
+                        cur_pitch <= (ALPHA * cur_pitch_gyro + (100 - ALPHA) * cur_pitch_acc) / 100;
+                        cur_roll  <= (ALPHA * cur_roll_gyro  + (100 - ALPHA) * cur_roll_acc) / 100;
+                        cur_yaw   <= cur_yaw_gyro;
+                        state <= CAL_ERROR;
                     end
+                CAL_ERROR:
+                    begin
+                        // 误差
+                        pitch_error <= tgt_pitch - cur_pitch;
+                        roll_error <= tgt_roll - cur_roll;
+                        yaw_error <= tgt_yaw - cur_yaw;
 
+                        // 更新积分
+                        i_pitch_error <= i_pitch_error + pitch_error;   //可能会溢出
+                        i_roll_error <= i_roll_error + roll_error;
+                        i_yaw_error <= i_yaw_error + yaw_error;
+                        // 更新微分
+                        d_pitch_error <= (pitch_error - pre_pitch_error) * 90 / 100; // 这里应该是除以dt,暂时用0.9代替
+                        d_roll_error <= (roll_error - pre_roll_error) * 90 / 100;
+                        d_yaw_error <= (yaw_error - pre_yaw_error) * 90 / 100;
+
+                        // 保存当前误差为下一次使用
+                        pre_pitch_error <= pitch_error;
+                        pre_roll_error <= roll_error;
+                        pre_yaw_error <= yaw_error;
+
+                        state <= CAL_PID;
+                    end
+                CAL_PID:
+                    begin
+                        state <= NEXT_CAPTURE;
+                        duty_1_oe <= 1;
+                        duty_2_oe <= 1;
+                        duty_3_oe <= 1;
+                        duty_3_oe <= 1;
+                        pwm_duty_1 <= PWM_base  - (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
+                                                - (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
+                                                - (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
+
+                        pwm_duty_2 <= PWM_base  - (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
+                                                + (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
+                                                + (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
+
+                        pwm_duty_3 <= PWM_base  + (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
+                                                - (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
+                                                + (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
+                                            
+                        pwm_duty_4 <= PWM_base  + (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
+                                                + (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
+                                                - (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
+                    end
+                NEXT_CAPTURE:
+                    begin
+                        duty_1_oe <= 0;
+                        duty_2_oe <= 0;
+                        duty_3_oe <= 0;
+                        duty_4_oe <= 0;
+                        if (signal_INT) state <= MPU_CAPTURE;
+                    end
                 default: state <= IDLE;
             endcase
         end
     end
     
+    reg [15:0] pwm_duty_1;
+    reg duty_1_oe;
+    wire pwm_1;
+    wire busy_1;
+
+    pwm PWM_1 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_1),
+        .speed_oe(duty_1_oe),
+        .pwm(pwm_1),
+        .busy(busy_1)
+    );
+
+    reg [15:0] pwm_duty_2;
+    reg duty_2_oe;
+    wire pwm_2;
+    wire busy_2;
+
+    pwm PWM_2 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_2),
+        .speed_oe(duty_2_oe),
+        .pwm(pwm_2),
+        .busy(busy_2)
+    );
+
+    reg [15:0] pwm_duty_3;
+    reg duty_3_oe;
+    wire pwm_3;
+    wire busy_3;
+
+    pwm PWM_3 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_3),
+        .speed_oe(duty_3_oe),
+        .pwm(pwm_3),
+        .busy(busy_3)
+    );
+
+    reg [15:0] pwm_duty_4;
+    reg duty_4_oe;
+    wire pwm_4;
+    wire busy_4;
+
+    pwm PWM_4 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_4),
+        .speed_oe(duty_4_oe),
+        .pwm(pwm_4),
+        .busy(busy_4)
+    );
+
+
     
 endmodule
-
-// // MPU数据采集和姿态计算
-//     reg [7:0] mpu_data_packed [0:11];  // MPU原始数据包
-//     reg [3:0] byte_counter;            // 数据字节计数器
-//     reg capture_done;                  // 数据采集完成标志
-//     reg posture_is_confirmed;          // 姿态计算完成标志
-//     reg [15:0] pitch_gyro, roll_gyro, yaw_gyro;  // 陀螺仪积分角度
-//     reg [15:0] current_pitch, current_roll;      // 当前姿态
-//     parameter signed [15:0] ALPHA = 98;          // 互补滤波系数 (0.98 * 100)
-//     parameter signed dt = 16'd1;                        // 假设时间步长（需根据实际采样率调整）
-//     integer i;
-
-//     // 加速度和陀螺仪数据转换
-//     wire signed [15:0] raw_ax = {mpu_data_packed[0], mpu_data_packed[1]};
-//     wire signed [15:0] raw_ay = {mpu_data_packed[2], mpu_data_packed[3]};
-//     wire signed [15:0] raw_az = {mpu_data_packed[4], mpu_data_packed[5]};
-//     wire signed [15:0] raw_gyro_x = {mpu_data_packed[6], mpu_data_packed[7]};
-//     wire signed [15:0] raw_gyro_y = {mpu_data_packed[8], mpu_data_packed[9]};
-//     wire signed [15:0] raw_gyro_z = {mpu_data_packed[10], mpu_data_packed[11]};
-
-//     assign ax = raw_ax * 10000 / 16384;
-//     assign ay = raw_ay * 10000 / 16384;
-//     assign az = raw_az * 10000 / 16384;
-//     assign gyro_x = raw_gyro_x * 10000 / 131;   // 陀螺仪分辨率通常是 131 LSB/(°/s)
-//     assign gyro_y = raw_gyro_y * 10000 / 131;
-//     assign gyro_z = raw_gyro_z * 10000 / 131;
-
-
-
-//     // PID相关信号
-//     reg [15:0] PWM_base;              // 基础PWM值
-//     reg [15:0] error_height;          // 高度误差
-//     reg [15:0] error_pitch, error_roll, error_yaw;  // 姿态误差
-//     reg [15:0] Integral_Pitch_error, Integral_Roll_error, Integral_Yaw_error;  // 积分项
-//     reg [15:0] Derivative_Pitch_error, Derivative_Roll_error, Derivative_Yaw_error;  // 微分项
-//     reg [15:0] prev_error_pitch, prev_error_roll, prev_error_yaw;  // 上一次误差
-//     parameter Kp_pitch = 16'd100, Ki_pitch = 16'd10, Kd_pitch = 16'd50;  // PID参数（示例值）
-//     parameter Kp_roll = 16'd100, Ki_roll = 16'd10, Kd_roll = 16'd50;
-//     parameter Kp_yaw = 16'd80, Ki_yaw = 16'd5, Kd_yaw = 16'd30;
-
-//     // 状态机时序逻辑
-//     always @(posedge clk or negedge rst_n) begin
-//         if (!rst_n) state <= IDLE;
-//         else state <= next_state;
-//     end
-
-//     // 状态机组合逻辑
-//     always @(*) begin
-//         case (state)
-//             IDLE: next_state = mpu_init_done ? MPU_CAPTURE : IDLE;
-//             MPU_CAPTURE: next_state = capture_done ? CURRENT : MPU_CAPTURE;
-//             CURRENT: next_state = posture_is_confirmed ? TARGET : CURRENT;
-//             TARGET: next_state = PID_CONTROL;
-//             PID_CONTROL: next_state = PWM_OUT;
-//             PWM_OUT: next_state = MPU_CAPTURE;
-//             ERROR: next_state = IDLE;  // 错误状态返回IDLE
-//             default: next_state = IDLE;
-//         endcase
-//     end
-
-//     // 主状态机输出逻辑
-//     always @(posedge clk or negedge rst_n) begin
-//         if (!rst_n) begin
-//             mpu_init <= 1;
-//             for (i = 0; i < 12; i = i + 1) mpu_data_packed[i] <= 8'd0;
-//             mpu_transfer <= 0;
-//             byte_counter <= 0;
-//             capture_done <= 0;
-//             posture_is_confirmed <= 0;
-//             pitch_gyro <= 0;
-//             roll_gyro <= 0;
-//             yaw_gyro <= 0;
-//             prev_error_pitch <= 0;
-//             prev_error_roll <= 0;
-//             prev_error_yaw <= 0;
-//             Integral_Pitch_error <= 0;
-//             Integral_Roll_error <= 0;
-//             Integral_Yaw_error <= 0;
-//             Derivative_Pitch_error <= 0;
-//             Derivative_Roll_error <= 0;
-//             Derivative_Yaw_error <= 0;
-//             pwm_M1 <= 0;
-//             pwm_M2 <= 0;
-//             pwm_M3 <= 0;
-//             pwm_M4 <= 0;
-//             m1_oe <= 0;
-//             m2_oe <= 0;
-//             m3_oe <= 0;
-//             m4_oe <= 0;
-//         end else begin
-//             case (state)
-//                 IDLE: begin
-//                     mpu_init <= 0;  // 初始化完成时关闭初始化信号
-//                 end
-//                 MPU_CAPTURE: begin
-//                     mpu_transfer <= 1;
-//                     if (mpu_data_oe) begin
-//                         if (byte_counter == 11) begin
-//                             byte_counter <= 0;
-//                             capture_done <= 1;
-//                             angle_start <= 1;
-//                             //mpu_transfer <= 0;
-//                             // 陀螺仪角度积分
-//                             pitch_gyro <= pitch_gyro + gyro_x * dt;
-//                             roll_gyro <= roll_gyro + gyro_y * dt;
-//                             yaw_gyro <= yaw_gyro + gyro_z * dt;
-//                         end else begin
-//                             byte_counter <= byte_counter + 1;
-//                             mpu_data_packed[byte_counter] <= mpu_data;
-//                         end
-//                     end
-//                 end
-//                 CURRENT: begin
-//                     capture_done <= 0;
-//                     angle_start <= 0;
-//                     if (angle_done) begin
-//                         // 互补滤波计算当前姿态
-//                         current_pitch <= (ALPHA * pitch_gyro + (100 - ALPHA) * pitch_accel) / 100;
-//                         current_roll <= (ALPHA * roll_gyro + (100 - ALPHA) * roll_accel) / 100;
-//                         posture_is_confirmed <= 1;
-//                     end
-//                 end
-//                 TARGET: begin
-//                     posture_is_confirmed <= 0;
-//                     // 计算误差
-//                     error_height <= target_height - current_height;
-//                     error_pitch <= target_pitch - current_pitch;
-//                     error_roll <= target_roll - current_roll;
-//                     error_yaw <= target_yaw - yaw_gyro;
-//                     PWM_base <= is_move ? PWM_BASE + TILT_CMP : PWM_BASE;
-
-//                     // 更新PID积分项和微分项
-//                     Integral_Pitch_error <= Integral_Pitch_error + error_pitch;//可能会溢出:
-//                     Integral_Roll_error <= Integral_Roll_error + error_roll;
-//                     Integral_Yaw_error <= Integral_Yaw_error + error_yaw;
-//                     Derivative_Pitch_error <= (error_pitch - prev_error_pitch) * 90 / 100;
-//                     Derivative_Roll_error <= (error_roll - prev_error_roll) * 90 / 100;
-//                     Derivative_Yaw_error <= (error_yaw - prev_error_yaw) * 90 / 100;
-
-//                     // 保存当前误差为下一次使用
-//                     prev_error_pitch <= error_pitch;
-//                     prev_error_roll <= error_roll;
-//                     prev_error_yaw <= error_yaw;
-//                 end
-//                 PID_CONTROL: begin
-//                     m1_oe <= 1;
-//                     m2_oe <= 1;
-//                     m3_oe <= 1;
-//                     m4_oe <= 1;
-//                     // 计算四个电机的PWM值
-//                     pwm_M1 <= PWM_base - (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
-//                                        - (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
-//                                        - (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-//                     pwm_M2 <= PWM_base - (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
-//                                        + (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
-//                                        + (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-//                     pwm_M3 <= PWM_base + (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
-//                                        - (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
-//                                        + (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-//                     pwm_M4 <= PWM_base + (Kp_pitch * error_pitch + Ki_pitch * Integral_Pitch_error + Kd_pitch * Derivative_Pitch_error)
-//                                        + (Kp_roll * error_roll + Ki_roll * Integral_Roll_error + Kd_roll * Derivative_Roll_error)
-//                                        - (Kp_yaw * error_yaw + Ki_yaw * Integral_Yaw_error + Kd_yaw * Derivative_Yaw_error);
-//                 end
-//                 PWM_OUT: begin
-//                     m1_oe <= 0;
-//                     m2_oe <= 0;
-//                     m3_oe <= 0;
-//                     m4_oe <= 0;
-//                 end
-//             endcase
-//         end
-//     end
-
-//     // PWM模块
-//     reg [15:0] pwm_M1, pwm_M2, pwm_M3, pwm_M4;  // 四个电机的PWM值
-//     reg m1_oe, m2_oe, m3_oe, m4_oe;             // PWM输出使能
-//     wire m1_busy, m2_busy, m3_busy, m4_busy;    // PWM忙碌信号
-
-//     pwm #(
-//         .MAX_SPEED(65536),
-//         .MIN_SPEED(256),
-//         .ACC(2560),
-//         .DEAD_ZONE(1280),
-//         .STATE_WIDTH(3)
-//     ) inst_pwm_M1 (
-//         .clk(clk),
-//         .rst_n(rst_n),
-//         .speed_in(pwm_M1),
-//         .speed_oe(m1_oe),
-//         .pwm_out(pwm_1_out),
-//         .busy(m1_busy)
-//     );
-
-//     pwm #(
-//         .MAX_SPEED(65536),
-//         .MIN_SPEED(256),
-//         .ACC(2560),
-//         .DEAD_ZONE(1280),
-//         .STATE_WIDTH(3)
-//     ) inst_pwm_M2 (
-//         .clk(clk),
-//         .rst_n(rst_n),
-//         .speed_in(pwm_M2),
-//         .speed_oe(m2_oe),
-//         .pwm_out(pwm_2_out),
-//         .busy(m2_busy)
-//     );
-
-//     pwm #(
-//         .MAX_SPEED(65536),
-//         .MIN_SPEED(256),
-//         .ACC(2560),
-//         .DEAD_ZONE(1280),
-//         .STATE_WIDTH(3)
-//     ) inst_pwm_M3 (
-//         .clk(clk),
-//         .rst_n(rst_n),
-//         .speed_in(pwm_M3),
-//         .speed_oe(m3_oe),
-//         .pwm_out(pwm_3_out),
-//         .busy(m3_busy)
-//     );
-
-//     pwm #(
-//         .MAX_SPEED(65536),
-//         .MIN_SPEED(256),
-//         .ACC(2560),
-//         .DEAD_ZONE(1280),
-//         .STATE_WIDTH(3)
-//     ) inst_pwm_M4 (
-//         .clk(clk),
-//         .rst_n(rst_n),
-//         .speed_in(pwm_M4),
-//         .speed_oe(m4_oe),
-//         .pwm_out(pwm_4_out),
-//         .busy(m4_busy)
-//     );
 
 //     // 串口模块
 //     wire RxD_idle;           // 串口空闲信号
@@ -406,12 +318,6 @@ endmodule
 //     wire RxD_data_ready;     // 数据就绪信号
 //     wire [7:0] RxD_data;     // 接收到的串口数据
 //     reg [7:0] action_reg;    // 目标动作寄存器
-//     wire is_move = (action_reg == 8'h03);  // 是否为前进状态
-//     reg [15:0] target_height;  // 目标高度
-//     reg [15:0] target_pitch;   // 目标俯仰角
-//     reg [15:0] target_roll;    // 目标滚转角
-//     reg [15:0] target_yaw;     // 目标偏航角
-//     reg [15:0] current_height;  // 当前高度（假设由外部输入或计算）
 
 //     async_receiver #(
 //         .ClkFrequency(50000000),  // 50MHz

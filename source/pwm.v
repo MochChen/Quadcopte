@@ -5,10 +5,11 @@ module pwm #(
     parameter DEAD_ZONE = ACC / 2,
     parameter STATE_WIDTH = 3
 )(
-    input clk, rst_n,
+    input clk,
+    input rst_n,
     input wire [15:0] speed_in,
     input wire speed_oe,
-    output wire pwm_out,
+    output wire pwm,
     output wire busy
 );
 
