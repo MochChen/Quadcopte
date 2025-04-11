@@ -1,3 +1,5 @@
+// 输出的角度只会在正负90度之间,超过90度会作为负数处理:比如135度等于-45度
+
 module cordic #(
     parameter integer ITERATIONS = 14  // 迭代次数
 )(
@@ -48,7 +50,7 @@ module cordic #(
                             end else begin
                                 state <= ROTATION;
                                 x_reg <= (x > 0) ? x : -x;
-                                y_reg <= y;
+                                y_reg <= (x > 0) ? y : -y;
                                 z_reg <= 0;
                             end
                         end
