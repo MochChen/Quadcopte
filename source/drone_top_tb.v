@@ -1,5 +1,7 @@
 `timescale 1ns / 1ps
-//`include "drone_top.v"
+// `include "drone_top.v"
+
+
 module drone_top_tb;
 
     reg clk;

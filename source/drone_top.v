@@ -1,10 +1,9 @@
- `include "mpu_top.v"
- `include "mpu_mid.v"
- `include "std_iic_master.v"
- `include "cordic_angle.v"
- `include "pwm.v"
- `include "async_receiver.v"
-
+//  `include "mpu_top.v"
+//  `include "mpu_mid.v"
+//  `include "std_iic_master.v"
+//  `include "cordic_angle.v"
+//  `include "pwm.v"
+//  `include "async_receiver.v"
 
 module drone_top #(
     parameter PWM_BASE = 16'd30000,  // 悬停时的基础PWM值

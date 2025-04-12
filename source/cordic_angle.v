@@ -1,4 +1,4 @@
-`include "cordic.v"
+// `include "cordic.v"
 // pitch = atan2(ax, sqrt(ay * ay + az * az));
 // roll  = atan2(ay, sqrt(ax * ax + az * az));
 
