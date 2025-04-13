@@ -6,6 +6,10 @@
 // `include "pwm.v"
 // `include "target_RS232.v"
 // `include "async_receiver.v"
+// `include "cal_gyro.v"
+// `include "cmp_filter.v"
+// `include "cal_error.v"
+// `include "cal_pid.v"
 
 module drone_top #(
     parameter PWM_BASE = 16'd30000,  // 悬停时的基础PWM值
@@ -20,7 +24,7 @@ module drone_top #(
     output pwm_2_out,       // PWM输出至电机2
     output pwm_3_out,       // PWM输出至电机3
     output pwm_4_out,       // PWM输出至电机4
-    input wire RxD               // 串口接收数据
+    input wire RxD          // 串口接收数据
 );
 
     // MPU模块
@@ -79,51 +83,22 @@ module drone_top #(
     );
 
 
-    parameter   IDLE         = 3'h0,
-                INIT_MPU     = 3'h1,
-                MPU_CAPTURE  = 3'h1,
-                CRD_PITCH    = 3'h2,
-                CRD_ROLL     = 3'h3,
-                CMP_FILTER   = 3'h4,
-                CAL_ERROR    = 3'h5,
-                CAL_PID      = 3'h6,
-                NEXT_CAPTURE = 3'h7;
-    reg [2:0] state = IDLE;
+    parameter   IDLE         = 4'h0,
+                INIT_MPU     = 4'h1,
+                MPU_CAPTURE  = 4'h2,
+                CRD_PITCH    = 4'h3,
+                CRD_ROLL     = 4'h4,
+                CMP_FILTER   = 4'h5,
+                CAL_ERROR    = 4'h6,
+                CAL_PID      = 4'h7,
+                PWM_OUT      = 4'h8,
+                NEXT_CAPTURE = 4'h9;
+    reg [3:0] state = IDLE;
 
     reg mpu_init_done_reg;
     reg [7:0] mpu_data_packed [13:0]; //一共14字节
     reg [3:0] byte_cnt = 0;
-    reg [3:0] ALPHA = 99;
-    reg dt = 1; //mpu采集的间隔时间,单位秒
-    reg [23:0] cur_pitch_gyro;
-    reg [23:0] cur_roll_gyro;
-    reg [23:0] cur_yaw_gyro;
-    always @(posedge clk) begin
-        if (mpu_read_done) begin
-            cur_pitch_gyro <= cur_pitch_gyro + dt * $signed({mpu_data_packed[8], mpu_data_packed[9]});
-            cur_roll_gyro <= cur_roll_gyro + dt * $signed({mpu_data_packed[10], mpu_data_packed[11]});
-            cur_yaw_gyro <= cur_yaw_gyro + dt * $signed({mpu_data_packed[12], mpu_data_packed[13]});
-        end
-    end
-    reg [23:0] cur_pitch; // 积分满了会不会溢出?
-    reg [23:0] cur_roll;
-    reg [23:0] cur_yaw;
-    reg [23:0] tgt_height;//由外部串口信号输入进行更新
-    reg [23:0] tgt_pitch; //由外部串口信号输入进行更新
-    reg [23:0] tgt_roll;  //由外部串口信号输入进行更新
-    reg [23:0] tgt_yaw;   //由外部串口信号输入进行更新
-    reg [23:0] pitch_error;
-    reg [23:0] roll_error;
-    reg [23:0] yaw_error;
-    reg [23:0] pre_pitch_error;
-    reg [23:0] pre_roll_error;
-    reg [23:0] pre_yaw_error;
-    reg [23:0] i_pitch_error;
-    reg [23:0] i_roll_error;
-    reg [23:0] i_yaw_error;
-    reg [23:0] d_pitch_error;
-    reg [23:0] d_roll_error;
-    reg [23:0] d_yaw_error;
+
     reg [23:0] PWM_base; //和高度控制有关,起飞时候逐渐增大,到达指定高度并且稳定决定,逻辑不知道怎么实现
     reg [7:0] Kp = 100;
     reg [7:0] Ki = 1;
@@ -190,56 +165,27 @@ module drone_top #(
                     end
                 CMP_FILTER:
                     begin
-                        cur_pitch <= (ALPHA * cur_pitch_gyro + (100 - ALPHA) * cur_pitch_acc) / 100;
-                        cur_roll  <= (ALPHA * cur_roll_gyro  + (100 - ALPHA) * cur_roll_acc) / 100;
-                        cur_yaw   <= cur_yaw_gyro;
+                        cmp_filter_en <= 1;
                         state <= CAL_ERROR;
                     end
                 CAL_ERROR:
                     begin
-                        // 误差
-                        pitch_error <= tgt_pitch - cur_pitch;
-                        roll_error <= tgt_roll - cur_roll;
-                        yaw_error <= tgt_yaw - cur_yaw;
-
-                        // 更新积分
-                        i_pitch_error <= i_pitch_error + pitch_error;   //可能会溢出
-                        i_roll_error <= i_roll_error + roll_error;
-                        i_yaw_error <= i_yaw_error + yaw_error;
-                        // 更新微分
-                        d_pitch_error <= (pitch_error - pre_pitch_error) * 90 / 100; // 这里应该是除以dt,暂时用0.9代替
-                        d_roll_error <= (roll_error - pre_roll_error) * 90 / 100;
-                        d_yaw_error <= (yaw_error - pre_yaw_error) * 90 / 100;
-
-                        // 保存当前误差为下一次使用
-                        pre_pitch_error <= pitch_error;
-                        pre_roll_error <= roll_error;
-                        pre_yaw_error <= yaw_error;
-
+                        cal_error_en <= 1;
                         state <= CAL_PID;
                     end
                 CAL_PID:
                     begin
+                        cal_pid_en <= 1;
+                        state <= PWM_OUT;
+                    end
+                PWM_OUT:
+                    begin
+                        cal_pid_en <= 0;
                         state <= NEXT_CAPTURE;
                         duty_1_oe <= 1;
                         duty_2_oe <= 1;
                         duty_3_oe <= 1;
                         duty_3_oe <= 1;
-                        pwm_duty_1 <= PWM_base  - (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
-                                                - (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
-                                                - (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
-
-                        pwm_duty_2 <= PWM_base  - (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
-                                                + (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
-                                                + (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
-
-                        pwm_duty_3 <= PWM_base  + (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
-                                                - (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
-                                                + (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
-                                            
-                        pwm_duty_4 <= PWM_base  + (Kp * pitch_error + Ki * i_pitch_error + Kd * d_pitch_error)
-                                                + (Kp * roll_error  + Ki * i_roll_error  + Kd * d_roll_error)
-                                                - (Kp * yaw_error   + Ki * i_yaw_error   + Kd * d_yaw_error);
                     end
                 NEXT_CAPTURE:
                     begin
@@ -254,7 +200,7 @@ module drone_top #(
         end
     end
     
-    reg [15:0] pwm_duty_1;
+
     reg duty_1_oe;
     wire pwm_1;
     wire busy_1;
@@ -268,7 +214,6 @@ module drone_top #(
         .busy(busy_1)
     );
 
-    reg [15:0] pwm_duty_2;
     reg duty_2_oe;
     wire pwm_2;
     wire busy_2;
@@ -282,7 +227,6 @@ module drone_top #(
         .busy(busy_2)
     );
 
-    reg [15:0] pwm_duty_3;
     reg duty_3_oe;
     wire pwm_3;
     wire busy_3;
@@ -296,7 +240,6 @@ module drone_top #(
         .busy(busy_3)
     );
 
-    reg [15:0] pwm_duty_4;
     reg duty_4_oe;
     wire pwm_4;
     wire busy_4;
@@ -327,6 +270,10 @@ module drone_top #(
         .target_roll(target_roll),
         .target_yaw(target_yaw)
     );
+    reg [23:0] tgt_height;//由外部串口信号输入进行更新
+    reg [23:0] tgt_pitch; //由外部串口信号输入进行更新
+    reg [23:0] tgt_roll;  //由外部串口信号输入进行更新
+    reg [23:0] tgt_yaw;   //由外部串口信号输入进行更新
     always @(posedge clk) 
         if (target_renew && (state != CAL_ERROR)) begin
             tgt_height <= target_height;
@@ -335,7 +282,109 @@ module drone_top #(
             tgt_yaw <= target_yaw;
         end
 
+    // 角速度积分
+    wire [23:0] cur_pitch_gyro;
+    wire [23:0] cur_roll_gyro;
+    wire [23:0] cur_yaw_gyro;
     
+    cal_gyro cal_gyro_ins (
+        .clk(clk),
+        .rst_n(rst_n),
+        .cal_gyro_en(mpu_read_done),
+        .mpu_data_packed_8(mpu_data_packed[8]),
+        .mpu_data_packed_9(mpu_data_packed[9]),
+        .mpu_data_packed_10(mpu_data_packed[10]),
+        .mpu_data_packed_11(mpu_data_packed[11]),
+        .mpu_data_packed_12(mpu_data_packed[12]),
+        .mpu_data_packed_13(mpu_data_packed[13]),
+        .cur_pitch_gyro(cur_pitch_gyro),
+        .cur_roll_gyro(cur_roll_gyro),
+        .cur_yaw_gyro(cur_yaw_gyro)
+    );
+    
+    // 滤波
+    reg cmp_filter_en;
+
+    wire [23:0] cur_pitch;
+    wire [23:0] cur_roll;
+    wire [23:0] cur_yaw;
+    
+    cmp_filter cmp_filter_ins (
+        .clk(clk),
+        .rst_n(rst_n),
+        .cmp_filter_en(cmp_filter_en),
+        .cur_pitch_gyro(cur_pitch_gyro),
+        .cur_roll_gyro(cur_roll_gyro),
+        .cur_yaw_gyro(cur_yaw_gyro),
+        .cur_pitch_acc({{8{cur_pitch_acc[15]}}, cur_pitch_acc}),
+        .cur_roll_acc({{8{cur_roll_acc[15]}}, cur_roll_acc}),
+        .cur_pitch(cur_pitch),
+        .cur_roll(cur_roll),
+        .cur_yaw(cur_yaw)
+    );
+    
+    // cal error
+    reg cal_error_en;
+
+    wire [23:0] pitch_error;
+    wire [23:0] roll_error;
+    wire [23:0] yaw_error;
+    wire [23:0] i_pitch_error;
+    wire [23:0] i_roll_error;
+    wire [23:0] i_yaw_error;
+    wire [23:0] d_pitch_error;
+    wire [23:0] d_roll_error;
+    wire [23:0] d_yaw_error;
+    
+    cal_error cal_error_ins (
+        .clk(clk),
+        .rst_n(rst_n),
+        .cal_error_en(cal_error_en),
+        .tgt_pitch(tgt_pitch),
+        .tgt_roll(tgt_roll),
+        .tgt_yaw(tgt_yaw),
+        .cur_pitch(cur_pitch),
+        .cur_roll(cur_roll),
+        .cur_yaw(cur_yaw),
+        .pitch_error(pitch_error),
+        .roll_error(roll_error),
+        .yaw_error(yaw_error),
+        .i_pitch_error(i_pitch_error),
+        .i_roll_error(i_roll_error),
+        .i_yaw_error(i_yaw_error),
+        .d_pitch_error(d_pitch_error),
+        .d_roll_error(d_roll_error),
+        .d_yaw_error(d_yaw_error)
+    );
+
+    // cal pid
+    reg cal_pid_en;
+
+    wire [15:0] pwm_duty_1;
+    wire [15:0] pwm_duty_2;
+    wire [15:0] pwm_duty_3;
+    wire [15:0] pwm_duty_4;
+
+    cal_pid cal_pid_ins (
+        .clk(clk),
+        .rst_n(rst_n),
+        .cal_pid_en(cal_pid_en),
+        .PWM_base(PWM_base),
+        .pitch_error(pitch_error),
+        .roll_error(roll_error),
+        .yaw_error(yaw_error),
+        .i_pitch_error(i_pitch_error),
+        .i_roll_error(i_roll_error),
+        .i_yaw_error(i_yaw_error),
+        .d_pitch_error(d_pitch_error),
+        .d_roll_error(d_roll_error),
+        .d_yaw_error(d_yaw_error),
+        .pwm_duty_1(pwm_duty_1),
+        .pwm_duty_2(pwm_duty_2),
+        .pwm_duty_3(pwm_duty_3),
+        .pwm_duty_4(pwm_duty_4)
+    );
+
 endmodule
 
 
