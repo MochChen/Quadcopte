@@ -35,10 +35,10 @@ module std_fifo (
     reg sync_rst_n_1;
     reg sync_rst_n_2; 
     always @(posedge wr_clk or negedge rd_rst_n) begin
-        if (!rd_rst_n) begin // 异步复位
+        if (!rd_rst_n) begin    // 异步复位
             sync_rst_n_1 <= 0;
             sync_rst_n_2 <= 0;
-        end else begin // 同步释放
+        end else begin          // 同步释放
             sync_rst_n_1 <= 1;
             sync_rst_n_2 <= sync_rst_n_1;
         end
