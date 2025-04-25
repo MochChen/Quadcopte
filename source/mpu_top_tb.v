@@ -1,5 +1,7 @@
 `timescale 1ns/1ps
-
+// `include "mpu_top.v"
+// `include "mpu_mid.v"
+// `include "std_iic_master.v"
 module mpu_top_tb;
 
     reg clk;

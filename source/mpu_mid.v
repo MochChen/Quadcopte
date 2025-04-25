@@ -10,12 +10,13 @@ module mpu_mid (
 
     output reg [15:0] n,
     output reg [15:0] m,
-    output [15:0] data_packed
+    //output [15:0] data_packed
+    output [127:0] data_packed  // 16 × 8 = 128 位
 
 );
     
     reg [7:0] data_0, data_1;
-    assign data_packed = {data_1, data_0};
+    assign data_packed = {112'b0, data_1, data_0};
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

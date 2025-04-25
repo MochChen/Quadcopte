@@ -10,9 +10,9 @@ module mpu_mid_tb;
 
     wire en_start;
     wire rd_now;
-    wire [2:0] n;
-    wire [2:0] m;
-    wire [15:0] data_packed;
+    wire [15:0] n;
+    wire [15:0] m;
+    wire [127:0] data_packed;
 
     // 时钟生成
     always #5 clk = ~clk;  // 100MHz

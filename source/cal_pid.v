@@ -23,9 +23,7 @@ module cal_pid #(
     output reg [15:0] pwm_duty_4
 
 );
-    reg [23:0] pre_pitch_error;
-    reg [23:0] pre_roll_error;
-    reg [23:0] pre_yaw_error;
+
     always @(posedge clk) begin
         if (!rst_n) begin
             pwm_duty_1 <= 0;

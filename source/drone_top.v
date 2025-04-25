@@ -17,13 +17,13 @@ module drone_top #(
 )(
     input clk,              // 50MHz主时钟
     input rst_n,            // 高有效复位
-    output scl,             // I2C时钟
-    inout sda,              // I2C数据
+    output wire scl,             // I2C时钟
+    inout wire sda,              // I2C数据
     input signal_INT,
-    output pwm_1_out,       // PWM输出至电机1
-    output pwm_2_out,       // PWM输出至电机2
-    output pwm_3_out,       // PWM输出至电机3
-    output pwm_4_out,       // PWM输出至电机4
+    output pwm_1,       // PWM输出至电机1
+    output pwm_2,       // PWM输出至电机2
+    output pwm_3,       // PWM输出至电机3
+    output pwm_4,       // PWM输出至电机4
     input wire RxD          // 串口接收数据
 );
 
@@ -34,6 +34,10 @@ module drone_top #(
     wire mpu_read_done;
     wire mpu_data_avalid;
     wire [7:0] mpu_data;
+    wire [2:0] iic_state;
+    wire sda_en;
+    wire sda_out;
+    wire sda_in;
 
     mpu_top mpu_ins (
         .clk(clk),
@@ -45,8 +49,14 @@ module drone_top #(
         .data_avalid(mpu_data_avalid),
         .data(mpu_data),
         .scl(scl),
-        .sda(sda)
+        .sda_en(sda_en),
+        .sda_out(sda_out),
+        .sda_in(sda_in),
+        .iic_state(iic_state)
     );
+
+    assign sda = sda_en ? sda_out : 1'bz;
+    assign sda_in = sda;
 
     // CORDIC角度计算模块
     wire signed [15:0] ax = $signed({mpu_data_packed[0], mpu_data_packed[1]});
@@ -92,47 +102,64 @@ module drone_top #(
                 CAL_ERROR    = 4'h6,
                 CAL_PID      = 4'h7,
                 PWM_OUT      = 4'h8,
-                NEXT_CAPTURE = 4'h9;
+                NEXT_CAPTURE = 4'h9,
+                SYS_ERROR    = 4'ha;
     reg [3:0] state = IDLE;
 
     reg mpu_init_done_reg;
     reg [7:0] mpu_data_packed [13:0]; //一共14字节
     reg [3:0] byte_cnt = 0;
 
-    reg [23:0] PWM_base; //和高度控制有关,起飞时候逐渐增大,到达指定高度并且稳定决定,逻辑不知道怎么实现
+    reg [23:0] PWM_base = 16'sd1000; //和高度控制有关,起飞时候逐渐增大,到达指定高度并且稳定决定,逻辑不知道怎么实现
     reg [7:0] Kp = 100;
     reg [7:0] Ki = 1;
     reg [7:0] Kd = 1;
-
+    reg [15:0] delay_cnt;//1ms计时，50MHz
+    reg init_error;
+    reg [13:0] init_error_cnt;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
+            mpu_init_done_reg <= 0;
+            delay_cnt <= 0;
+            init_error_cnt <= 0;
         end else begin
             case (state)
-                IDLE:
+                IDLE: //0
                     begin
                         if (!mpu_init_done_reg) begin
                             state <= INIT_MPU;
                             mpu_init_start <= 1;
                         end else begin
-                            if (signal_INT) begin
+
+                            if (delay_cnt == 49999) begin
                                 state <= MPU_CAPTURE;
                                 mpu_read_start <= 1;
+                                delay_cnt <= 0;
                             end else begin
                                 state <= IDLE;
+                                delay_cnt <= delay_cnt + 1;
                             end
                         end
+                        init_error_cnt <= 0;
                     end
-                INIT_MPU:
+                INIT_MPU: //1
                     begin
                         mpu_init_start <= 0;
                         if (mpu_init_done) begin
                             mpu_init_done_reg <= 1;
                             state <= IDLE;
+                        end else begin
+                            init_error_cnt <= init_error_cnt + 1;
+                            if (&init_error_cnt) begin
+                                init_error <= 1;
+                                init_error_cnt <= 0;
+                                state <= SYS_ERROR;
+                            end
                         end
                     end
-                MPU_CAPTURE:
+                MPU_CAPTURE://2
                     begin
                         mpu_read_start <= 0;
                         if (mpu_read_done) begin
@@ -146,7 +173,7 @@ module drone_top #(
                             byte_cnt <= byte_cnt + 1;
                         end
                     end
-                CRD_PITCH:
+                CRD_PITCH://3
                     begin
                         pitch_start <= 0;
                         if (pitch_done) begin
@@ -155,7 +182,7 @@ module drone_top #(
                             roll_start <= 1;
                         end
                     end
-                CRD_ROLL:
+                CRD_ROLL://4
                     begin
                         roll_start <= 0;
                         if (roll_done) begin
@@ -163,37 +190,49 @@ module drone_top #(
                             state <= CMP_FILTER;
                         end
                     end
-                CMP_FILTER:
+                CMP_FILTER://5
                     begin
                         cmp_filter_en <= 1;
                         state <= CAL_ERROR;
                     end
-                CAL_ERROR:
+                CAL_ERROR://6
                     begin
                         cal_error_en <= 1;
                         state <= CAL_PID;
                     end
-                CAL_PID:
+                CAL_PID://7
                     begin
+                        cal_error_en <= 0;
                         cal_pid_en <= 1;
                         state <= PWM_OUT;
                     end
-                PWM_OUT:
+                PWM_OUT://8
                     begin
                         cal_pid_en <= 0;
                         state <= NEXT_CAPTURE;
                         duty_1_oe <= 1;
                         duty_2_oe <= 1;
                         duty_3_oe <= 1;
-                        duty_3_oe <= 1;
+                        duty_4_oe <= 1;
                     end
-                NEXT_CAPTURE:
+                NEXT_CAPTURE://9
                     begin
                         duty_1_oe <= 0;
                         duty_2_oe <= 0;
                         duty_3_oe <= 0;
                         duty_4_oe <= 0;
-                        if (signal_INT) state <= MPU_CAPTURE;
+                        if (delay_cnt == 49999) begin //决定了控制频率
+                            mpu_read_start <= 1;
+                            delay_cnt <= 0;
+                            state <= MPU_CAPTURE;
+                        end else begin
+                            state <= NEXT_CAPTURE;
+                            delay_cnt <= delay_cnt + 1;
+                        end
+                    end
+                SYS_ERROR:
+                    begin
+                        if (!rst_n) state <= IDLE;
                     end
                 default: state <= IDLE;
             endcase
@@ -202,7 +241,6 @@ module drone_top #(
     
 
     reg duty_1_oe;
-    wire pwm_1;
     wire busy_1;
 
     pwm PWM_1 (
@@ -215,7 +253,6 @@ module drone_top #(
     );
 
     reg duty_2_oe;
-    wire pwm_2;
     wire busy_2;
 
     pwm PWM_2 (
@@ -228,7 +265,6 @@ module drone_top #(
     );
 
     reg duty_3_oe;
-    wire pwm_3;
     wire busy_3;
 
     pwm PWM_3 (
@@ -241,7 +277,6 @@ module drone_top #(
     );
 
     reg duty_4_oe;
-    wire pwm_4;
     wire busy_4;
 
     pwm PWM_4 (
@@ -255,10 +290,10 @@ module drone_top #(
 
     // 目标指令
     wire target_renew;
-    wire [15:0] target_height;
-    wire [15:0] target_pitch;
-    wire [15:0] target_roll;
-    wire [15:0] target_yaw;
+    wire signed [23:0] target_height;
+    wire signed [23:0] target_pitch;
+    wire signed [23:0] target_roll;
+    wire signed [23:0] target_yaw;
 
     target_RS232 target_ins(
         .clk(clk),
@@ -270,10 +305,10 @@ module drone_top #(
         .target_roll(target_roll),
         .target_yaw(target_yaw)
     );
-    reg [23:0] tgt_height;//由外部串口信号输入进行更新
-    reg [23:0] tgt_pitch; //由外部串口信号输入进行更新
-    reg [23:0] tgt_roll;  //由外部串口信号输入进行更新
-    reg [23:0] tgt_yaw;   //由外部串口信号输入进行更新
+    reg signed [23:0] tgt_height;//由外部串口信号输入进行更新
+    reg signed [23:0] tgt_pitch; //由外部串口信号输入进行更新
+    reg signed [23:0] tgt_roll;  //由外部串口信号输入进行更新
+    reg signed [23:0] tgt_yaw;   //由外部串口信号输入进行更新
     always @(posedge clk) 
         if (target_renew && (state != CAL_ERROR)) begin
             tgt_height <= target_height;
@@ -305,9 +340,9 @@ module drone_top #(
     // 滤波
     reg cmp_filter_en;
 
-    wire [23:0] cur_pitch;
-    wire [23:0] cur_roll;
-    wire [23:0] cur_yaw;
+    wire signed [23:0] cur_pitch;
+    wire signed [23:0] cur_roll;
+    wire signed [23:0] cur_yaw;
     
     cmp_filter cmp_filter_ins (
         .clk(clk),
@@ -383,6 +418,15 @@ module drone_top #(
         .pwm_duty_2(pwm_duty_2),
         .pwm_duty_3(pwm_duty_3),
         .pwm_duty_4(pwm_duty_4)
+    );
+
+    ila_0 ins_ILA (
+        .clk(clk), // input wire clk
+
+        .probe0(scl), // input wire [0:0]  probe0  
+        .probe1(sda), // input wire [0:0]  probe1
+        .probe2(state), // input wire [3:0]  probe2
+        .probe3(iic_state) // input wire [2:0]  probe3
     );
 
 endmodule

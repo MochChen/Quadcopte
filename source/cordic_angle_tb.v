@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 `include "cordic_angle.v"
+`include "cordic.v"
 
 module cordic_angle_tb();
 
@@ -47,9 +48,9 @@ module cordic_angle_tb();
         
         // 示例：ax = 0.5g, ay = 0.5g, az = 0.707g （正好是 pitch = roll = 30度）
         // 假设1g对应的数值为 16384（±2g 模式），所以：
-        x = 16'sd11585;       // ax ≈ 0g
-        y = 16'sd0;        // ay ≈ 0g
-        z = 16'sd10000;       // az ≈ 0.707g
+        x = -16'sd1;       // ax ≈ 0g
+        y = -16'sd1;        // ay ≈ 0g
+        z = -16'sd1;       // az ≈ 0.707g
         #20;
 
         cdra_start = 1;

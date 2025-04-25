@@ -1,70 +1,81 @@
 `timescale 1ns / 1ps
-// `include "drone_top.v"
-
 
 module drone_top_tb;
 
     reg clk;
     reg rst_n;
     reg RxD;
+    reg signal_INT;
     wire scl;
-    wire sda;
-    wire pwm_1_out, pwm_2_out, pwm_3_out, pwm_4_out;
+    wire sda;           // ¸ÄÎª wire£¬ÓÉ I?C Ö÷Éè±¸Çı¶¯
+    wire pwm_1, pwm_2, pwm_3, pwm_4;
 
-    // å®ä¾‹åŒ–è¢«æµ‹æ¨¡å—
+    // Ä£Äâ I?C Éè±¸Çı¶¯ sda£¨±ÈÈç MPU6050£©
+    reg sda_drive = 1;  // Ä¬ÈÏ¸ßµçÆ½£¨ÊÍ·Å£©
+    reg sda_dir = 0;    // 0: ÊÍ·Å£¨¸ß×èÌ¬£©£¬1: Çı¶¯
+    assign sda = sda_dir ? sda_drive : 1'bz;  // ÈıÌ¬¿ØÖÆ
+    //assign sda = sda_dir ? sda_drive : 1'b1;  // ÈıÌ¬¿ØÖÆ,·ÂÕæÊ±ºòÉèÖÃÈ«1ÊäÈë
+
+    // ÊµÀı»¯±»²âÄ£¿é
     drone_top uut (
         .clk(clk),
         .rst_n(rst_n),
         .scl(scl),
         .sda(sda),
-        .pwm_1_out(pwm_1_out),
-        .pwm_2_out(pwm_2_out),
-        .pwm_3_out(pwm_3_out),
-        .pwm_4_out(pwm_4_out),
+        .signal_INT(signal_INT),
+        .pwm_1(pwm_1),
+        .pwm_2(pwm_2),
+        .pwm_3(pwm_3),
+        .pwm_4(pwm_4),
         .RxD(RxD) 
     );
 
-    // äº§ç”Ÿæ—¶é’Ÿ
+    // ²úÉúÊ±ÖÓ
     always #10 clk = ~clk;
 
-    // æ¨¡æ‹Ÿä¸²å£è¾“å…¥
+    // Ä£Äâ´®¿ÚÊäÈë
     task send_uart_byte(input [7:0] data);
         integer i;
         begin
-            RxD = 0; // èµ·å§‹ä½
-            #8680;  // 115200 baud -> ä¸€ä¸ªbitæ—¶é—´çº¦8.68us
+            RxD = 0; // ÆğÊ¼Î»
+            #8680;  // 115200 baud -> Ò»¸öbitÊ±¼äÔ¼8.68us
             for (i = 0; i < 8; i = i + 1) begin
                 RxD = data[i];
                 #8680;
             end
-            RxD = 1; // åœæ­¢ä½
+            RxD = 1; // Í£Ö¹Î»
             #8680;
         end
     endtask
 
-    // æµ‹è¯•è¿‡ç¨‹
+    // ²âÊÔ¹ı³Ì
     initial begin
         clk = 0;
-        rst_n = 1;
+        rst_n = 0;
         RxD = 1;
+        sda_dir = 0;  // ³õÊ¼ÊÍ·Å sda
 
-        // å¤ä½
-        #50 rst_n = 0;
+        // ¸´Î»
         #50 rst_n = 1;
 
-        // å‘é€ä¸²å£å‘½ä»¤ï¼ˆèµ·é£ 8'h01ï¼‰
-        #1000 send_uart_byte(8'h01);
+        #100 signal_INT = 1;
 
-        // ç­‰å¾…PIDè®¡ç®—
-        #50000;
+        // ·¢ËÍ´®¿ÚÃüÁî£¨Æğ·É 8'h01£©
+        #1000 send_uart_byte(8'h0A); // START_BYTE
+        #1000 send_uart_byte(8'h04); // Ç°½ø
+        #1000 send_uart_byte(8'h08); // STOP_BYTE
 
-        // å‘é€ä¸²å£å‘½ä»¤ï¼ˆå‰è¿› 8'h03ï¼‰
-        send_uart_byte(8'h03);
+        #100000 signal_INT = 0;
+        #500000 signal_INT = 1;
+        #100000 signal_INT = 0;
 
-        // ç»§ç»­ä»¿çœŸä¸€æ®µæ—¶é—´
+        #500000 signal_INT = 1;
+        #100000 signal_INT = 0;
+
+        // ¼ÌĞø·ÂÕæÒ»¶ÎÊ±¼ä
         #100000;
         
-        // åœæ­¢ä»¿çœŸ
+        // Í£Ö¹·ÂÕæ
         $finish;
     end
 endmodule

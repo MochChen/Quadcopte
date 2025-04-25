@@ -5,15 +5,18 @@ module mpu_top (
     input clk,
     input rst_n,
 
-    input init_start,
-    output init_done,
-    input read_start,
-    output read_done,
+    input wire init_start,
+    output wire init_done,
+    input wire read_start,
+    output wire read_done,
     
-    output data_avalid,
-    output [7:0] data,
-    output scl,
-    inout sda
+    output wire data_avalid,
+    output wire [7:0] data,
+    output wire scl,
+    output wire sda_en,
+    output wire sda_out,
+    input wire sda_in,
+    output wire  [2:0] iic_state
 );
 
     wire en_start;
@@ -21,7 +24,7 @@ module mpu_top (
 
     wire [15:0] n;
     wire [15:0] m;
-    wire [15:0] data_packed;
+    wire [127:0] data_packed;
 
     mpu_mid u_mpu_mid (
         .clk(clk),
@@ -36,22 +39,22 @@ module mpu_top (
     );
 
     // 实例化 std_iic_master 模块
-    std_iic_master #(
-        .CLK_MAIN(50000000),   // 根据你的主时钟设定
-        .SCL_DIV(800000),     // I2C SCL 分频
-        .SLAVE_ADDR(8'h68)       // I2C 设备地址
-    ) u_std_iic_master (
+    std_iic_master u_std_iic_master (
         .clk(clk),
         .rst_n(rst_n),
         .en_start(en_start),
         .n_send(n),
         .m_read(m),
-        .send_done(init_done),
+        .data_packed (data_packed),
+        .init_done(init_done),
         .read_now(read_now),
         .scl(scl),
-        .sda(sda), 
+        .sda_en(sda_en),
+        .sda_out(sda_out),
+        .sda_in(sda_in),
         .data_avalid(data_avalid),
-        .data(data)
+        .data(data),
+        .iic_state(iic_state)
     );
 
     reg [3:0] cnt = 0;
