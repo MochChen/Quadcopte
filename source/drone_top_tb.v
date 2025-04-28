@@ -1,25 +1,26 @@
 `timescale 1ns / 1ps
+// `include "drone_top.v"
 
 module drone_top_tb;
 
-    reg clk;
-    reg rst_n;
+    reg FCLK_CLK0_0;
+    reg FCLK_RESET0_N_0;
     reg RxD;
     reg signal_INT;
     wire scl;
-    wire sda;           // ¸ÄÎª wire£¬ÓÉ I?C Ö÷Éè±¸Çý¶¯
+    wire sda;           // æ”¹ä¸º wireï¼Œç”± IIC ä¸»è®¾å¤‡é©±åŠ¨
     wire pwm_1, pwm_2, pwm_3, pwm_4;
 
-    // Ä£Äâ I?C Éè±¸Çý¶¯ sda£¨±ÈÈç MPU6050£©
-    reg sda_drive = 1;  // Ä¬ÈÏ¸ßµçÆ½£¨ÊÍ·Å£©
-    reg sda_dir = 0;    // 0: ÊÍ·Å£¨¸ß×èÌ¬£©£¬1: Çý¶¯
-    assign sda = sda_dir ? sda_drive : 1'bz;  // ÈýÌ¬¿ØÖÆ
-    //assign sda = sda_dir ? sda_drive : 1'b1;  // ÈýÌ¬¿ØÖÆ,·ÂÕæÊ±ºòÉèÖÃÈ«1ÊäÈë
+    // æ¨¡æ‹Ÿ I?C è®¾å¤‡é©±åŠ¨ sdaï¼ˆæ¯”å¦‚ MPU6050ï¼‰
+    reg sda_drive = 1;  // é»˜è®¤é«˜ç”µå¹³ï¼ˆé‡Šæ”¾ï¼‰
+    reg sda_dir = 0;    // 0: é‡Šæ”¾ï¼ˆé«˜é˜»æ€ï¼‰ï¼Œ1: é©±åŠ¨
+    assign sda = sda_dir ? sda_drive : 1'bz;  // ä¸‰æ€æŽ§åˆ¶
+    //assign sda = sda_dir ? sda_drive : 1'b1;  // ä¸‰æ€æŽ§åˆ¶,ä»¿çœŸæ—¶å€™è®¾ç½®å…¨1è¾“å…¥
 
-    // ÊµÀý»¯±»²âÄ£¿é
+    // å®žä¾‹åŒ–è¢«æµ‹æ¨¡å—
     drone_top uut (
-        .clk(clk),
-        .rst_n(rst_n),
+        .FCLK_CLK0_0(FCLK_CLK0_0),
+        .FCLK_RESET0_N_0(FCLK_RESET0_N_0),
         .scl(scl),
         .sda(sda),
         .signal_INT(signal_INT),
@@ -30,39 +31,39 @@ module drone_top_tb;
         .RxD(RxD) 
     );
 
-    // ²úÉúÊ±ÖÓ
-    always #10 clk = ~clk;
+    // äº§ç”Ÿæ—¶é’Ÿ
+    always #10 FCLK_CLK0_0 = ~FCLK_CLK0_0;
 
-    // Ä£Äâ´®¿ÚÊäÈë
+    // æ¨¡æ‹Ÿä¸²å£è¾“å…¥
     task send_uart_byte(input [7:0] data);
         integer i;
         begin
-            RxD = 0; // ÆðÊ¼Î»
-            #8680;  // 115200 baud -> Ò»¸öbitÊ±¼äÔ¼8.68us
+            RxD = 0; // èµ·å§‹ä½
+            #8680;  // 115200 baud -> ä¸€ä¸ªbitæ—¶é—´çº¦8.68us
             for (i = 0; i < 8; i = i + 1) begin
                 RxD = data[i];
                 #8680;
             end
-            RxD = 1; // Í£Ö¹Î»
+            RxD = 1; // åœæ­¢ä½
             #8680;
         end
     endtask
 
-    // ²âÊÔ¹ý³Ì
+    // æµ‹è¯•è¿‡ç¨‹
     initial begin
-        clk = 0;
-        rst_n = 0;
+        FCLK_CLK0_0 = 0;
+        FCLK_RESET0_N_0 = 0;
         RxD = 1;
-        sda_dir = 0;  // ³õÊ¼ÊÍ·Å sda
+        sda_dir = 0;  // åˆå§‹é‡Šæ”¾ sda
 
-        // ¸´Î»
-        #50 rst_n = 1;
+        // å¤ä½
+        #50 FCLK_RESET0_N_0 = 1;
 
         #100 signal_INT = 1;
 
-        // ·¢ËÍ´®¿ÚÃüÁî£¨Æð·É 8'h01£©
+        // å‘é€ä¸²å£å‘½ä»¤ï¼ˆèµ·é£ž 8'h01ï¼‰
         #1000 send_uart_byte(8'h0A); // START_BYTE
-        #1000 send_uart_byte(8'h04); // Ç°½ø
+        #1000 send_uart_byte(8'h04); // å‰è¿›
         #1000 send_uart_byte(8'h08); // STOP_BYTE
 
         #100000 signal_INT = 0;
@@ -72,10 +73,10 @@ module drone_top_tb;
         #500000 signal_INT = 1;
         #100000 signal_INT = 0;
 
-        // ¼ÌÐø·ÂÕæÒ»¶ÎÊ±¼ä
+        // ç»§ç»­ä»¿çœŸä¸€æ®µæ—¶é—´
         #100000;
         
-        // Í£Ö¹·ÂÕæ
+        // åœæ­¢ä»¿çœŸ
         $finish;
     end
 endmodule

@@ -12,85 +12,23 @@
 // `include "cal_pid.v"
 
 module drone_top #(
-    parameter PWM_BASE = 16'd30000,  // æ‚¬åœæ—¶çš„åŸºç¡€PWMå€¼
-    parameter TILT_CMP = 16'd5000   // å€¾æ–œæ—¶çš„å‡åŠ›è¡¥å¿
+    parameter PWM_BASE = 16'd30000,  // ĞüÍ£Ê±µÄ»ù´¡PWMÖµ
+    parameter TILT_CMP = 16'd5000    // ÇãĞ±Ê±µÄÉıÁ¦²¹³¥
 )(
-    input clk,              // 50MHzä¸»æ—¶é’Ÿ
-    input rst_n,            // é«˜æœ‰æ•ˆå¤ä½
-    output wire scl,             // I2Cæ—¶é’Ÿ
-    inout wire sda,              // I2Cæ•°æ®
-    input signal_INT,
-    output pwm_1,       // PWMè¾“å‡ºè‡³ç”µæœº1
-    output pwm_2,       // PWMè¾“å‡ºè‡³ç”µæœº2
-    output pwm_3,       // PWMè¾“å‡ºè‡³ç”µæœº3
-    output pwm_4,       // PWMè¾“å‡ºè‡³ç”µæœº4
-    input wire RxD          // ä¸²å£æ¥æ”¶æ•°æ®
+    // input wire clk,              // 50MHzÖ÷Ê±ÖÓ
+    input wire FCLK_CLK0_0,         // 50MHzÖ÷Ê±ÖÓ
+    input wire FCLK_RESET0_N_0,     // µÍÓĞĞ§¸´Î»
+    output wire scl,             // I2CÊ±ÖÓ
+    inout wire sda,              // I2CÊı¾İ
+    input wire signal_INT,
+    output wire pwm_1,       // PWMÊä³öÖÁµç»ú1
+    output wire pwm_2,       // PWMÊä³öÖÁµç»ú2
+    output wire pwm_3,       // PWMÊä³öÖÁµç»ú3
+    output wire pwm_4,       // PWMÊä³öÖÁµç»ú4
+    input wire RxD           // ´®¿Ú½ÓÊÕÊı¾İ
 );
-
-    // MPUæ¨¡å—
-    reg mpu_init_start;
-    reg mpu_read_start;
-    wire mpu_init_done;
-    wire mpu_read_done;
-    wire mpu_data_avalid;
-    wire [7:0] mpu_data;
-    wire [2:0] iic_state;
-    wire sda_en;
-    wire sda_out;
-    wire sda_in;
-
-    mpu_top mpu_ins (
-        .clk(clk),
-        .rst_n(rst_n),
-        .init_start(mpu_init_start),
-        .read_start(mpu_read_start),
-        .init_done(mpu_init_done),
-        .read_done(mpu_read_done),
-        .data_avalid(mpu_data_avalid),
-        .data(mpu_data),
-        .scl(scl),
-        .sda_en(sda_en),
-        .sda_out(sda_out),
-        .sda_in(sda_in),
-        .iic_state(iic_state)
-    );
-
-    assign sda = sda_en ? sda_out : 1'bz;
-    assign sda_in = sda;
-
-    // CORDICè§’åº¦è®¡ç®—æ¨¡å—
-    wire signed [15:0] ax = $signed({mpu_data_packed[0], mpu_data_packed[1]});
-    wire signed [15:0] ay = $signed({mpu_data_packed[2], mpu_data_packed[3]});
-    wire signed [15:0] az = $signed({mpu_data_packed[4], mpu_data_packed[5]});
-    reg pitch_start;
-    wire pitch_done;
-    wire [15:0] pitch_acc;
-    reg [15:0] cur_pitch_acc;
-    cordic_angle pitch_inst (
-        .clk(clk),
-        .rst_n(rst_n),
-        .x(ax),
-        .y(ay),
-        .z(az),
-        .cdra_start(pitch_start),
-        .cdra_done(pitch_done),
-        .crda_angle(pitch_acc)
-    );
-
-    reg roll_start;
-    wire roll_done;
-    wire [15:0] roll_acc;
-    reg [15:0] cur_roll_acc;
-    cordic_angle roll_inst (
-        .clk(clk),
-        .rst_n(rst_n),
-        .x(ay), //æ›´æ¢ä½ç½®å°±æ˜¯roll
-        .y(ax),
-        .z(az),
-        .cdra_start(roll_start),
-        .cdra_done(roll_done),
-        .crda_angle(roll_acc)
-    );
+    wire clk = FCLK_CLK0_0;
+    wire rst_n = FCLK_RESET0_N_0;
 
 
     parameter   IDLE         = 4'h0,
@@ -107,23 +45,26 @@ module drone_top #(
     reg [3:0] state = IDLE;
 
     reg mpu_init_done_reg;
-    reg [7:0] mpu_data_packed [13:0]; //ä¸€å…±14å­—èŠ‚
-    reg [3:0] byte_cnt = 0;
+    reg init_error;
+    reg [7:0] mpu_data_packed [13:0]; //Ò»¹²14×Ö½Ú
+    reg [13:0] init_error_cnt;
+    reg [3:0] byte_cnt;
 
-    reg [23:0] PWM_base = 16'sd1000; //å’Œé«˜åº¦æ§åˆ¶æœ‰å…³,èµ·é£æ—¶å€™é€æ¸å¢å¤§,åˆ°è¾¾æŒ‡å®šé«˜åº¦å¹¶ä¸”ç¨³å®šå†³å®š,é€»è¾‘ä¸çŸ¥é“æ€ä¹ˆå®ç°
+    reg [15:0] delay_cnt;//1ms¼ÆÊ±£¬50MHz
+
+    reg [23:0] PWM_base = 16'sd1000; //ºÍ¸ß¶È¿ØÖÆÓĞ¹Ø,Æğ·ÉÊ±ºòÖğ½¥Ôö´ó,µ½´ïÖ¸¶¨¸ß¶È²¢ÇÒÎÈ¶¨¾ö¶¨,Âß¼­²»ÖªµÀÔõÃ´ÊµÏÖ
     reg [7:0] Kp = 100;
     reg [7:0] Ki = 1;
     reg [7:0] Kd = 1;
-    reg [15:0] delay_cnt;//1msè®¡æ—¶ï¼Œ50MHz
-    reg init_error;
-    reg [13:0] init_error_cnt;
-
+    
+    
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
             mpu_init_done_reg <= 0;
             delay_cnt <= 0;
             init_error_cnt <= 0;
+            byte_cnt <= 0;
         end else begin
             case (state)
                 IDLE: //0
@@ -132,7 +73,6 @@ module drone_top #(
                             state <= INIT_MPU;
                             mpu_init_start <= 1;
                         end else begin
-
                             if (delay_cnt == 49999) begin
                                 state <= MPU_CAPTURE;
                                 mpu_read_start <= 1;
@@ -167,7 +107,7 @@ module drone_top #(
                             byte_cnt <= 0;
                             pitch_start <= 1;
                         end
-                        // åœ¨è¿™é‡Œè¯»å–14å­—èŠ‚æ•°æ®
+                        // ÔÚÕâÀï¶ÁÈ¡14×Ö½ÚÊı¾İ
                         if (mpu_data_avalid) begin
                             mpu_data_packed[byte_cnt] <= mpu_data;
                             byte_cnt <= byte_cnt + 1;
@@ -221,7 +161,7 @@ module drone_top #(
                         duty_2_oe <= 0;
                         duty_3_oe <= 0;
                         duty_4_oe <= 0;
-                        if (delay_cnt == 49999) begin //å†³å®šäº†æ§åˆ¶é¢‘ç‡
+                        if (delay_cnt == 49999) begin //¾ö¶¨ÁË¿ØÖÆÆµÂÊ
                             mpu_read_start <= 1;
                             delay_cnt <= 0;
                             state <= MPU_CAPTURE;
@@ -238,57 +178,77 @@ module drone_top #(
             endcase
         end
     end
+
+    // MPUÄ£¿éÊµÀı»¯
+    reg mpu_init_start;
+    reg mpu_read_start;
+    wire mpu_init_done;
+    wire mpu_read_done;
+    wire mpu_data_avalid;
+    wire [7:0] mpu_data;
+    wire [2:0] iic_state;
+    wire sda_en;
+    wire sda_out;
+    wire sda_in;
+
+    mpu_top mpu_ins (
+        .clk(clk),
+        .rst_n(rst_n),
+        .init_start(mpu_init_start),
+        .read_start(mpu_read_start),
+        .init_done(mpu_init_done),
+        .read_done(mpu_read_done),
+        .data_avalid(mpu_data_avalid),
+        .data(mpu_data),
+        .scl(scl),
+        .sda_en(sda_en),
+        .sda_out(sda_out),
+        .sda_in(sda_in),
+        .iic_state(iic_state)
+    );
+
+    assign sda = sda_en ? sda_out : 1'bz; //¶¥²ãÊ¹ÓÃÈıÌ¬ÃÅinout
+    assign sda_in = sda;
+
+
+    // ÓÃ¼ÓËÙ¶È¼ÆËã½Ç¶ÈÄ£¿éÊµÀı»¯
+    wire signed [15:0] ax = $signed({mpu_data_packed[0], mpu_data_packed[1]});
+    wire signed [15:0] ay = $signed({mpu_data_packed[2], mpu_data_packed[3]});
+    wire signed [15:0] az = $signed({mpu_data_packed[4], mpu_data_packed[5]});
+
+    reg pitch_start;
+    wire pitch_done;
+    wire [15:0] pitch_acc;
+    reg [15:0] cur_pitch_acc;
+
+    cordic_angle pitch_inst (
+        .clk(clk),
+        .rst_n(rst_n),
+        .x(ax),
+        .y(ay),
+        .z(az),
+        .cdra_start(pitch_start),
+        .cdra_done(pitch_done),
+        .crda_angle(pitch_acc)
+    );
+
+    reg roll_start;
+    wire roll_done;
+    wire [15:0] roll_acc;
+    reg [15:0] cur_roll_acc;
+
+    cordic_angle roll_inst (
+        .clk(clk),
+        .rst_n(rst_n),
+        .x(ay), //¸ü»»Î»ÖÃ¾ÍÊÇroll
+        .y(ax),
+        .z(az),
+        .cdra_start(roll_start),
+        .cdra_done(roll_done),
+        .crda_angle(roll_acc)
+    );
     
-
-    reg duty_1_oe;
-    wire busy_1;
-
-    pwm PWM_1 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .speed_in(pwm_duty_1),
-        .speed_oe(duty_1_oe),
-        .pwm(pwm_1),
-        .busy(busy_1)
-    );
-
-    reg duty_2_oe;
-    wire busy_2;
-
-    pwm PWM_2 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .speed_in(pwm_duty_2),
-        .speed_oe(duty_2_oe),
-        .pwm(pwm_2),
-        .busy(busy_2)
-    );
-
-    reg duty_3_oe;
-    wire busy_3;
-
-    pwm PWM_3 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .speed_in(pwm_duty_3),
-        .speed_oe(duty_3_oe),
-        .pwm(pwm_3),
-        .busy(busy_3)
-    );
-
-    reg duty_4_oe;
-    wire busy_4;
-
-    pwm PWM_4 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .speed_in(pwm_duty_4),
-        .speed_oe(duty_4_oe),
-        .pwm(pwm_4),
-        .busy(busy_4)
-    );
-
-    // ç›®æ ‡æŒ‡ä»¤
+    // Ä¿±êÖ¸Áî
     wire target_renew;
     wire signed [23:0] target_height;
     wire signed [23:0] target_pitch;
@@ -305,10 +265,10 @@ module drone_top #(
         .target_roll(target_roll),
         .target_yaw(target_yaw)
     );
-    reg signed [23:0] tgt_height;//ç”±å¤–éƒ¨ä¸²å£ä¿¡å·è¾“å…¥è¿›è¡Œæ›´æ–°
-    reg signed [23:0] tgt_pitch; //ç”±å¤–éƒ¨ä¸²å£ä¿¡å·è¾“å…¥è¿›è¡Œæ›´æ–°
-    reg signed [23:0] tgt_roll;  //ç”±å¤–éƒ¨ä¸²å£ä¿¡å·è¾“å…¥è¿›è¡Œæ›´æ–°
-    reg signed [23:0] tgt_yaw;   //ç”±å¤–éƒ¨ä¸²å£ä¿¡å·è¾“å…¥è¿›è¡Œæ›´æ–°
+    reg signed [23:0] tgt_height;//ÓÉÍâ²¿´®¿ÚĞÅºÅÊäÈë½øĞĞ¸üĞÂ
+    reg signed [23:0] tgt_pitch; //ÓÉÍâ²¿´®¿ÚĞÅºÅÊäÈë½øĞĞ¸üĞÂ
+    reg signed [23:0] tgt_roll;  //ÓÉÍâ²¿´®¿ÚĞÅºÅÊäÈë½øĞĞ¸üĞÂ
+    reg signed [23:0] tgt_yaw;   //ÓÉÍâ²¿´®¿ÚĞÅºÅÊäÈë½øĞĞ¸üĞÂ
     always @(posedge clk) 
         if (target_renew && (state != CAL_ERROR)) begin
             tgt_height <= target_height;
@@ -317,7 +277,7 @@ module drone_top #(
             tgt_yaw <= target_yaw;
         end
 
-    // è§’é€Ÿåº¦ç§¯åˆ†
+    // ½ÇËÙ¶È»ı·Ö
     wire [23:0] cur_pitch_gyro;
     wire [23:0] cur_roll_gyro;
     wire [23:0] cur_yaw_gyro;
@@ -337,7 +297,7 @@ module drone_top #(
         .cur_yaw_gyro(cur_yaw_gyro)
     );
     
-    // æ»¤æ³¢
+    // »¥²¹ÂË²¨
     reg cmp_filter_en;
 
     wire signed [23:0] cur_pitch;
@@ -420,14 +380,52 @@ module drone_top #(
         .pwm_duty_4(pwm_duty_4)
     );
 
-    ila_0 ins_ILA (
-        .clk(clk), // input wire clk
+    // pwmÊä³öĞÅºÅ
+    reg duty_1_oe;
+    reg duty_2_oe;
+    reg duty_3_oe;
+    reg duty_4_oe;
+    wire busy_1;
+    wire busy_2;
+    wire busy_3;
+    wire busy_4;
 
-        .probe0(scl), // input wire [0:0]  probe0  
-        .probe1(sda), // input wire [0:0]  probe1
-        .probe2(state), // input wire [3:0]  probe2
-        .probe3(iic_state) // input wire [2:0]  probe3
+    pwm PWM_1 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_1),
+        .speed_oe(duty_1_oe),
+        .pwm(pwm_1),
+        .busy(busy_1)
     );
+
+    pwm PWM_2 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_2),
+        .speed_oe(duty_2_oe),
+        .pwm(pwm_2),
+        .busy(busy_2)
+    );
+
+    pwm PWM_3 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_3),
+        .speed_oe(duty_3_oe),
+        .pwm(pwm_3),
+        .busy(busy_3)
+    );
+
+    pwm PWM_4 (
+        .clk(clk),
+        .rst_n(rst_n),
+        .speed_in(pwm_duty_4),
+        .speed_oe(duty_4_oe),
+        .pwm(pwm_4),
+        .busy(busy_4)
+    );
+
 
 endmodule
 
