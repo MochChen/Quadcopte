@@ -3,7 +3,7 @@
 // roll  = atan2(ay, sqrt(ax * ax + az * az));
 
 module cordic_angle #(
-    parameter integer ITERATIONS = 12  // CORDIC 迭代次数
+    parameter integer ITERATIONS = 14  // CORDIC 迭代次数
 )(
     input clk,
     input rst_n,
@@ -16,11 +16,11 @@ module cordic_angle #(
     output reg signed [15:0] crda_angle
 );
 
-    parameter   IDLE        = 3'h0,
+    localparam  IDLE        = 3'h0,
                 CRD_START   = 3'h1,
                 CAL_MGNI    = 3'h2,
                 STOP        = 3'h3;
-    reg [2:0] state = IDLE;
+    reg [2:0] state;
     
     reg signed [23:0] x_reg;
     reg signed [23:0] y_reg;
@@ -36,7 +36,7 @@ module cordic_angle #(
     reg signed [23:0] crd_magnitude_reg;// = crd_magnitude * 0.607253 = (crd_magnitude  * 0.607253 * 2^14 ) >>> 14
 
     cordic #(
-        .ITERATIONS(12)
+        .ITERATIONS(14)
     ) cordic_angle_calc (
         .clk(clk),
         .rst_n(rst_n),
@@ -51,10 +51,19 @@ module cordic_angle #(
     // 状态机
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin  
+            cdra_done <= 0;
+            crda_angle <= 0;
+
             x_reg <= 0;
             y_reg <= 0;
             z_reg <= 0;
             mgni <= 0;
+
+            crd_start <= 0;
+            crd_x <= 0;
+            crd_y <= 0;
+            crd_magnitude_reg <= 0;
+
             state <= IDLE;
         end else begin
             case (state)
@@ -74,10 +83,10 @@ module cordic_angle #(
                             crd_start <= 1;
                             crd_x <= y_reg;
                             crd_y <= z_reg;
-                        end else begin      //第二次计算 角度
+                        end else begin      //第二次计算 角度,CORDIC是atan2(y, x)，不是atan2(x, y)！
                             crd_start <= 1;
-                            crd_x <= x_reg;
-                            crd_y <= crd_magnitude_reg;
+                            crd_x <= crd_magnitude_reg;
+                            crd_y <= x_reg;
                         end
                     end
                 CAL_MGNI: 
@@ -91,7 +100,13 @@ module cordic_angle #(
                             end else begin
                                 state <= STOP; // 结束
                                 cdra_done <= 1;
-                                crda_angle <= crd_angle; // 隐式转换,23bit转成16bit
+                                crda_angle <= $signed(crd_angle[15:0]); // 23bit转成16bit,见下方说明
+                                /************************************************************\
+                                说明:
+                                -   5895表示45.000°,缩放为131,和陀螺仪保持一致缩放倍数,直接加减;
+                                -   最大值在cordic中限制了90度,也就是说crd_angle的最大值是正负11790,
+                                    小于2的15次方正负32768,直接取低16位,不会影响精度.
+                                \************************************************************/
                             end
                         end
                     end
